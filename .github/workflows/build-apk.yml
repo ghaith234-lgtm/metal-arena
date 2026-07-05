@@ -5,45 +5,24 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  GODOT_VERSION: "4.3"
-
 jobs:
   android:
     runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.3
     steps:
       - name: Checkout project
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Download Godot and export templates
+      - name: Setup Godot templates and editor settings
         run: |
-          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
-          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
-          unzip -q "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
-          chmod +x "Godot_v${GODOT_VERSION}-stable_linux.x86_64"
-          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
-          mkdir -p "$TEMPLATE_DIR"
-          unzip -q "Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
-          mv templates/* "$TEMPLATE_DIR/"
-
-      - name: Configure Godot editor settings
-        run: |
-          MINOR="$(echo "$GODOT_VERSION" | cut -d. -f1,2)"
-          mkdir -p "$HOME/.config/godot"
-          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
-          [gd_resource type="EditorSettings" format=3]
-
-          [resource]
-          export/android/android_sdk_path = "${ANDROID_HOME}"
-          export/android/java_sdk_path = "${JAVA_HOME}"
-          EOF
-          cp "$HOME/.config/godot/editor_settings-4.tres" "$HOME/.config/godot/editor_settings-${MINOR}.tres"
+          mkdir -p ~/.local/share/godot/export_templates
+          mkdir -p ~/.config
+          mv /root/.config/godot ~/.config/godot || true
+          mv /root/.local/share/godot/export_templates/4.3.stable ~/.local/share/godot/export_templates/4.3.stable || true
+          grep -q "export/android/java_sdk_path" ~/.config/godot/editor_settings-4.3.tres || echo 'export/android/java_sdk_path = "/usr/lib/jvm/java-17-openjdk-amd64"' >> ~/.config/godot/editor_settings-4.3.tres
+          echo "--- editor settings android/java lines: ---"
+          grep -E "export/android" ~/.config/godot/editor_settings-4.3.tres || true
 
       - name: Check keystore exists in repo
         run: |
@@ -52,17 +31,9 @@ jobs:
             exit 1
           fi
 
-      - name: Point export preset at the keystore
-        run: |
-          sed -i "s|^keystore/debug=.*|keystore/debug=\"${GITHUB_WORKSPACE}/debug.keystore\"|" export_presets.cfg
-          sed -i 's|^keystore/debug_user=.*|keystore/debug_user="androiddebugkey"|' export_presets.cfg
-          sed -i 's|^keystore/debug_password=.*|keystore/debug_password="android"|' export_presets.cfg
-          echo "--- keystore lines now: ---"
-          grep "^keystore/" export_presets.cfg || echo "(no keystore lines in preset - env vars will be used)"
-
       - name: Import project resources
         run: |
-          ./Godot_v${GODOT_VERSION}-stable_linux.x86_64 --headless --path . --import || true
+          godot --headless --path . --import || true
 
       - name: Export debug APK
         env:
@@ -71,7 +42,7 @@ jobs:
           GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
         run: |
           mkdir -p build
-          ./Godot_v${GODOT_VERSION}-stable_linux.x86_64 --headless --verbose --path . --export-debug "Android" build/metal-arena.apk
+          godot --headless --verbose --path . --export-debug "Android" build/metal-arena.apk
           test -f build/metal-arena.apk
           ls -la build/
 
