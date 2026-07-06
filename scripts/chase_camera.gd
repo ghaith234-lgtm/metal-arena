@@ -14,7 +14,7 @@ var _trauma := 0.0
 
 
 func add_trauma(amount: float) -> void:
-	_trauma = clampf(_trauma + amount, 0.0, 1.0)
+	_trauma = clampf(_trauma + amount, 0.0, 1.5)
 
 
 func _ready() -> void:
@@ -44,11 +44,13 @@ func _physics_process(delta: float) -> void:
 	if _trauma > 0.0:
 		_trauma = maxf(_trauma - delta * 1.6, 0.0)
 		var shake := _trauma * _trauma
-		h_offset = randf_range(-1.0, 1.0) * shake * 0.45
-		v_offset = randf_range(-1.0, 1.0) * shake * 0.45
+		h_offset = randf_range(-1.0, 1.0) * shake * 0.6
+		v_offset = randf_range(-1.0, 1.0) * shake * 0.6
+		rotation.z = randf_range(-1.0, 1.0) * shake * 0.04
 	else:
 		h_offset = 0.0
 		v_offset = 0.0
+		rotation.z = lerpf(rotation.z, 0.0, clampf(delta * 8.0, 0.0, 1.0))
 
 
 func _flat_forward() -> Vector3:

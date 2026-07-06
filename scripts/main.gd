@@ -35,6 +35,7 @@ var _center_label: Label
 var _drift_label: Label
 var _hitmarker: Label
 var _hp_fill: ColorRect
+var _boost_fill: ColorRect
 var _kills := 0
 var _marker_time := 0.0
 var _drift_time := 0.0
@@ -179,9 +180,22 @@ func _build_ui() -> void:
 	_hp_fill.size = Vector2(240, 16)
 	layer.add_child(_hp_fill)
 
+	# شريط النيترو تحت شريط الصحة
+	var boost_bg := ColorRect.new()
+	boost_bg.color = Color(0, 0, 0, 0.45)
+	boost_bg.position = Vector2(26, 82)
+	boost_bg.size = Vector2(244, 12)
+	layer.add_child(boost_bg)
+
+	_boost_fill = ColorRect.new()
+	_boost_fill.color = Color(0.3, 0.8, 1.0)
+	_boost_fill.position = Vector2(28, 84)
+	_boost_fill.size = Vector2(240, 8)
+	layer.add_child(_boost_fill)
+
 	_ammo_label = Label.new()
-	_ammo_label.position = Vector2(26, 88)
-	_ammo_label.add_theme_font_size_override("font_size", 21)
+	_ammo_label.position = Vector2(26, 100)
+	_ammo_label.add_theme_font_size_override("font_size", 20)
 	_ammo_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
 	layer.add_child(_ammo_label)
 
@@ -258,6 +272,8 @@ func _spawn_player() -> void:
 	car.hit_landed.connect(_on_hit_landed)
 	car.ammo_changed.connect(_refresh_ammo)
 	car.drifted.connect(_on_drifted)
+	car.boost_changed.connect(_on_boost_changed)
+	car.mine_charging.connect(_on_mine_charging)
 
 
 func _spawn_dummies() -> void:
@@ -314,11 +330,12 @@ func _on_hit_landed() -> void:
 	_marker_time = 0.08
 
 
-func _on_boom(pos: Vector3) -> void:
+func _on_boom(pos: Vector3, strength: float) -> void:
 	if car == null:
 		return
 	var d := car.global_position.distance_to(pos)
-	_cam.add_trauma(clampf(0.85 - d / 30.0, 0.0, 0.85))
+	var reach := 30.0 * strength
+	_cam.add_trauma(clampf((0.85 - d / reach) * strength, 0.0, 1.4))
 
 
 func _on_drifted(duration: float) -> void:
@@ -328,14 +345,34 @@ func _on_drifted(duration: float) -> void:
 	_drift_time = 1.6
 
 
+func _on_boost_changed(current: float, maximum: float) -> void:
+	var r := clampf(current / maximum, 0.0, 1.0)
+	_boost_fill.size.x = 240.0 * r
+	_boost_fill.color = Color(0.9, 0.4, 0.2).lerp(Color(0.3, 0.8, 1.0), r)
+	controls.set_boost_ratio(r)
+
+
+func _on_mine_charging(ratio: float) -> void:
+	controls.set_mine_charge(ratio)
+	if ratio > 0.0:
+		_center_label.visible = true
+		_center_label.text = "توحيد العبوات... %d%%" % roundi(ratio * 100.0)
+		_center_label.modulate = Color(1.0, 0.55, 0.1)
+	elif car != null and car.alive:
+		_center_label.visible = false
+		_center_label.modulate = Color(1.0, 0.35, 0.3)
+
+
 func _refresh_ammo() -> void:
 	if car == null:
 		return
 	var parts := []
-	for k in ["rocket", "homing", "mine"]:
+	for k in ["rocket", "homing"]:
 		var seg: String = "%s %d" % [SPECIAL_NAMES[k], car.ammo[k]]
 		if k == car.special:
 			seg = "« " + seg + " »"
 		parts.append(seg)
+	parts.append("%s %d" % [SPECIAL_NAMES["mine"], car.ammo["mine"]])
 	_ammo_label.text = "  |  ".join(parts)
 	controls.set_special_text("%s%d" % [SPECIAL_CODES[car.special], car.ammo[car.special]])
+	controls.set_mine_text("لغم %d" % car.ammo["mine"])

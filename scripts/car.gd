@@ -13,6 +13,8 @@ signal hit_landed
 signal respawned
 signal ammo_changed
 signal drifted(duration)
+signal boost_changed(current, maximum)
+signal mine_charging(ratio)
 
 # ---------- التعليق ----------
 @export var suspension_rest: float = 0.5
@@ -41,6 +43,14 @@ signal drifted(duration)
 @export var gun_range: float = 60.0
 @export var respawn_delay: float = 4.0
 
+# ---------- بوست الاصطدام (نيترو) ----------
+@export var boost_max: float = 100.0
+@export var boost_force: float = 2600.0        # قوة الدفع
+@export var boost_drain: float = 45.0          # استهلاك بالثانية
+@export var boost_regen: float = 12.0          # تعبئة بالثانية
+@export var boost_ram_damage: float = 22.0     # ضرر الاصطدام وقت البوست
+@export var mine_hold_time: float = 3.0        # ثواني الضغط لزرع عبوة عملاقة
+
 var controls: Node = null
 var input_enabled := true
 var sounds_enabled := true
@@ -51,7 +61,7 @@ var health := 100.0
 var ammo := {"rocket": 0, "homing": 0, "mine": 0}
 var special := "rocket"
 
-const SPECIAL_ORDER = ["rocket", "homing", "mine"]
+const SPECIAL_ORDER = ["rocket", "homing"]   # القاذف والمتتبع (اللغم له زر مستقل)
 
 const WHEEL_ANCHORS = [
 	Vector3(-0.62, -0.15, -0.85),
@@ -70,11 +80,22 @@ var _special_prev := false
 var _cycle_in := false
 var _cycle_prev := false
 var _steer := 0.0
+var _throttle := 0.0
 var _flip_timer := 0.0
 var _fire_cooldown := 0.0
 var _special_cooldown := 0.0
 var _flash_timer := 0.0
 var _drift_time := 0.0
+var _boost := 100.0
+var _boosting := false
+var _boost_in := false
+var _mine_in := false
+var _mine_prev := false
+var _mine_hold := 0.0
+var _mine_fired_mega := false
+var _boost_snd: AudioStreamPlayer3D
+var _boost_flame_l: GPUParticles3D
+var _boost_flame_r: GPUParticles3D
 var _wheel_dist := [0.0, 0.0, 0.0, 0.0]
 var _steer_pivots: Array = []
 var _spin_nodes: Array = []
@@ -107,6 +128,7 @@ func _ready() -> void:
 	pm.bounce = 0.2
 	physics_material_override = pm
 	health = max_health
+	_boost = boost_max
 	_build_body()
 	_build_wheels()
 	_build_effects()
@@ -126,7 +148,8 @@ func set_body_color(c: Color) -> void:
 
 func give_ammo(kind: String, amount: int) -> void:
 	ammo[kind] += amount
-	special = kind
+	if kind != "mine":            # اللغم له زره الخاص، ما يبدّل مؤشر السلاح
+		special = kind
 	ammo_changed.emit()
 
 
@@ -154,6 +177,7 @@ func _physics_process(delta: float) -> void:
 			wheels_on_ground += 1
 	_grounded = wheels_on_ground > 0
 	_apply_drive()
+	_apply_boost(delta)
 	_try_fire(delta)
 	_handle_special(delta)
 	_track_drift(delta)
@@ -165,6 +189,7 @@ func _physics_process(delta: float) -> void:
 func _read_input() -> void:
 	if not input_enabled:
 		_steer = 0.0
+		_throttle = 0.0
 		_drifting = false
 		_braking = false
 		_firing = false
@@ -173,18 +198,28 @@ func _read_input() -> void:
 		return
 	if controls != null:
 		_steer = controls.get_steer()
+		_throttle = controls.get_throttle()
 		_drifting = controls.is_drifting()
 		_braking = controls.is_braking()
 		_firing = controls.is_firing()
 		_special_in = controls.is_special_pressed()
 		_cycle_in = controls.is_cycle_pressed()
+		_boost_in = controls.is_boost_pressed()
+		_mine_in = controls.is_mine_pressed()
 	else:
 		_steer = Input.get_axis("ui_left", "ui_right")
+		_throttle = 0.0
+		if Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W):
+			_throttle = 1.0
+		elif Input.is_key_pressed(KEY_DOWN):
+			_throttle = -1.0
 		_drifting = Input.is_key_pressed(KEY_SPACE)
-		_braking = Input.is_action_pressed("ui_down") or Input.is_key_pressed(KEY_S)
+		_braking = Input.is_key_pressed(KEY_S)
 		_firing = Input.is_key_pressed(KEY_F) or Input.is_key_pressed(KEY_ENTER)
 		_special_in = Input.is_key_pressed(KEY_Q)
 		_cycle_in = Input.is_key_pressed(KEY_E)
+		_boost_in = Input.is_key_pressed(KEY_SHIFT)
+		_mine_in = Input.is_key_pressed(KEY_R)
 
 
 func _process_wheel(i: int) -> bool:
@@ -233,23 +268,59 @@ func _apply_drive() -> void:
 	var speed := fwd.dot(linear_velocity)
 
 	if _grounded:
+		# البريك الصريح له الأولوية
 		if _braking:
 			if speed > 1.0:
 				apply_central_force(-fwd * brake_power)
 			elif speed > -reverse_speed:
 				apply_central_force(-fwd * engine_power * 0.55)
-		else:
+		elif _throttle > 0.05:
+			# تسارع للأمام حسب مقدار دفع الجويستيك
 			var ratio := clampf(speed / max_speed, 0.0, 1.0)
-			apply_central_force(fwd * engine_power * (1.0 - ratio * ratio))
+			apply_central_force(fwd * engine_power * _throttle * (1.0 - ratio * ratio))
+		elif _throttle < -0.05:
+			# رجوع للخلف
+			if speed > 0.5:
+				apply_central_force(-fwd * brake_power * 0.8)   # كبح أول
+			elif speed > -reverse_speed:
+				apply_central_force(fwd * engine_power * _throttle * 0.55)
+		else:
+			# ما أكو دفع => احتكاك يبطّئ السيارة تدريجياً (ما تنطلق بروحها)
+			apply_central_force(-fwd * speed * 6.0)
 
+		# الانعطاف يشتغل بس إذا السيارة تتحرك
 		var speed_factor := clampf(absf(speed) / 7.0, 0.0, 1.0)
 		var reverse_flip := 1.0 if speed >= -0.5 else -1.0
-		var boost := 1.35 if _drifting else 1.0
-		apply_torque(b.y * (-_steer * steer_strength * boost * speed_factor * reverse_flip * mass))
+		var drift_mult := 1.35 if _drifting else 1.0
+		apply_torque(b.y * (-_steer * steer_strength * drift_mult * speed_factor * reverse_flip * mass))
 		apply_central_force(-b.y * absf(speed) * 4.0)
 	else:
 		apply_torque(b.y * (-_steer * air_steer * mass))
 		apply_central_force(Vector3.DOWN * extra_air_gravity * mass)
+
+
+# ============================================================
+#  بوست الاصطدام (نيترو)
+# ============================================================
+
+func _apply_boost(delta: float) -> void:
+	var b := global_transform.basis
+	var want := _boost_in and _boost > 1.0 and input_enabled
+	_boosting = want
+	if want:
+		apply_central_force(-b.z * boost_force)
+		_boost = maxf(_boost - boost_drain * delta, 0.0)
+	else:
+		_boost = minf(_boost + boost_regen * delta, boost_max)
+	boost_changed.emit(_boost, boost_max)
+
+	_boost_flame_l.emitting = _boosting
+	_boost_flame_r.emitting = _boosting
+	if _boost_snd != null:
+		if _boosting and not _boost_snd.playing:
+			_boost_snd.play()
+		elif not _boosting and _boost_snd.playing:
+			_boost_snd.stop()
 
 
 # ============================================================
@@ -296,18 +367,46 @@ func _try_fire(delta: float) -> void:
 
 func _handle_special(delta: float) -> void:
 	_special_cooldown -= delta
+	# زر السلاح الخاص (قاذف / متتبع فقط)
 	if _cycle_in and not _cycle_prev:
 		cycle_special()
 	if _special_in and not _special_prev and _special_cooldown <= 0.0:
 		_fire_special()
 	_special_prev = _special_in
 	_cycle_prev = _cycle_in
+	# زر العبوات المنفصل: ضغطة = وحدة، ضغط مستمر 3 ثواني = عبوة عملاقة
+	_handle_mine_button(delta)
+
+
+func _handle_mine_button(delta: float) -> void:
+	if _mine_in:
+		if not _mine_prev:
+			# بداية الضغط
+			_mine_hold = 0.0
+			_mine_fired_mega = false
+		if ammo["mine"] >= 2 and not _mine_fired_mega:
+			_mine_hold += delta
+			mine_charging.emit(clampf(_mine_hold / mine_hold_time, 0.0, 1.0))
+			if _mine_hold >= mine_hold_time:
+				_plant_mega_mine()
+				_mine_fired_mega = true
+				mine_charging.emit(0.0)
+	else:
+		if _mine_prev and not _mine_fired_mega:
+			# رفعنا الإصبع قبل 3 ثواني => عبوة وحدة
+			_plant_single_mine()
+		if _mine_prev:
+			mine_charging.emit(0.0)
+		_mine_hold = 0.0
+	_mine_prev = _mine_in
 
 
 func _fire_special() -> void:
-	if ammo[special] <= 0:
+	if special == "mine":
 		cycle_special()
 	if ammo[special] <= 0:
+		cycle_special()
+	if ammo[special] <= 0 or special == "mine":
 		Fx.sound(global_position, "beep", -12.0, 0.6)
 		return
 	_special_cooldown = 0.5
@@ -316,8 +415,6 @@ func _fire_special() -> void:
 			_launch_projectile(false)
 		"homing":
 			_launch_projectile(true)
-		"mine":
-			_plant_mine()
 	ammo[special] -= 1
 	if ammo[special] <= 0:
 		cycle_special()
@@ -362,13 +459,38 @@ func _find_target() -> Node3D:
 	return best
 
 
-func _plant_mine() -> void:
+func _plant_single_mine() -> void:
+	if ammo["mine"] <= 0:
+		Fx.sound(global_position, "beep", -12.0, 0.6)
+		return
+	ammo["mine"] -= 1
+	_spawn_mine(1.0, 30.0, 4.2, 12.0, 1.0)
+	Fx.sound(global_position, "beep", -6.0, 0.75)
+	ammo_changed.emit()
+
+
+func _plant_mega_mine() -> void:
+	# يدمج كل الألغام بعبوة عملاقة: زلزال + عصف
+	var count: int = ammo["mine"]
+	if count <= 0:
+		return
+	ammo["mine"] = 0
+	_spawn_mine(1.6 + minf(count, 8) * 0.16, 30.0 + count * 18.0, 4.2 + count * 1.3, 12.0 + count * 3.0, 1.6 + count * 0.35)
+	Fx.sound(global_position, "beep", 0.0, 0.4)
+	ammo_changed.emit()
+
+
+func _spawn_mine(size_mult: float, dmg: float, radius: float, launch: float, quake: float) -> void:
 	var m := Mine.new()
 	m.owner_car = self
+	m.size_mult = size_mult
+	m.damage = dmg
+	m.blast_radius = radius
+	m.launch_dv = launch
+	m.quake_strength = quake
 	get_parent().add_child(m)
-	m.global_position = global_transform * Vector3(0.0, -0.4, 2.0)
+	m.global_position = global_transform * Vector3(0.0, -0.4, 2.0 + size_mult * 0.5)
 	m.global_position.y = maxf(m.global_position.y, 0.05)
-	Fx.sound(global_position, "beep", -6.0, 0.75)
 
 
 # ============================================================
@@ -398,11 +520,15 @@ func _die(attacker: Node) -> void:
 	_drift_smoke_l.emitting = false
 	_drift_smoke_r.emitting = false
 	_damage_smoke.emitting = false
+	_boost_flame_l.emitting = false
+	_boost_flame_r.emitting = false
 	_body_mat.emission_enabled = false
 	if _engine_snd != null:
 		_engine_snd.stop()
 	if _drift_snd != null:
 		_drift_snd.stop()
+	if _boost_snd != null:
+		_boost_snd.stop()
 	await get_tree().create_timer(respawn_delay).timeout
 	_respawn()
 
@@ -417,6 +543,8 @@ func _respawn() -> void:
 	freeze = false
 	alive = true
 	_flip_timer = 0.0
+	_boost = boost_max
+	boost_changed.emit(_boost, boost_max)
 	if _engine_snd != null:
 		_engine_snd.play()
 	respawned.emit()
@@ -425,15 +553,63 @@ func _respawn() -> void:
 func _on_body_entered(body: Node) -> void:
 	if not alive:
 		return
-	var hv := linear_velocity
-	hv.y = 0.0
-	var v := hv.length()
-	if v < 8.0:
-		return
+	# نحسب مدى الاصطدام "المواجه" باستخدام عمودي السطح من حالة الفيزياء
+	var state := PhysicsServer3D.body_get_direct_state(get_rid())
+	var impact := 0.0
+	var contact := global_position - global_transform.basis.z * 1.2
+	if state != null:
+		for i in state.get_contact_count():
+			if state.get_contact_collider(i) != body.get_rid():
+				continue
+			var normal: Vector3 = state.get_contact_local_normal(i)
+			# مقدار السرعة المعاكسة للسطح = شدة الصدمة الحقيقية
+			var closing := -linear_velocity.dot(normal)
+			if closing > impact:
+				impact = closing
+				contact = state.get_contact_local_position(i)
+	else:
+		# احتياط: لو ما توفرت حالة التلامس
+		var hv := linear_velocity
+		hv.y = 0.0
+		impact = hv.length()
+
+	# صدم سيارة ثانية: نضررها حسب السرعة الأفقية
 	if body is ArcadeCar:
-		body.take_damage((v - 6.0) * 2.4, self)
-	if v > 14.0:
-		take_damage((v - 14.0) * 1.2, self)
+		var hv := linear_velocity
+		hv.y = 0.0
+		var v := hv.length()
+		if v >= 8.0:
+			var dmg := (v - 6.0) * 2.4
+			if _boosting:
+				dmg += boost_ram_damage
+				var push: Vector3 = (body.global_position - global_position).normalized()
+				body.apply_central_impulse(push * mass * 6.0)
+			body.take_damage(dmg, self)
+			_spawn_impact(contact)
+			Fx.sound(contact, "hit", 2.0, 0.6)
+
+	# ضرر على نفسك فقط من الصدمات المواجهة القوية (جدار/سيارة)
+	# الصعود على منحدر أو ملامسة الأرض عموديها للأعلى => closing صغير => لا ضرر
+	var self_threshold := 16.0
+	if impact > self_threshold:
+		take_damage((impact - self_threshold) * (0.7 if _boosting else 1.1), self)
+		if not (body is ArcadeCar):
+			_spawn_impact(contact)
+
+
+func _spawn_impact(pos: Vector3) -> void:
+	var p := _make_particles(Vector3.ZERO, Color(1.0, 0.95, 0.6), 14, 0.3, 3.0, 9.0, 0.08)
+	remove_child(p)
+	get_parent().add_child(p)
+	p.global_position = pos
+	var pm: ParticleProcessMaterial = p.process_material
+	pm.spread = 180.0
+	pm.gravity = Vector3(0.0, -6.0, 0.0)
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.emitting = true
+	await get_tree().create_timer(0.5).timeout
+	p.queue_free()
 
 
 # ============================================================
@@ -767,6 +943,40 @@ func _build_effects() -> void:
 	_drift_smoke_r = _make_particles(Vector3(0.62, -0.35, 0.9), Color(0.85, 0.85, 0.85, 0.55), 26, 0.7, 0.8, 2.0, 0.14)
 	_damage_smoke = _make_particles(Vector3(0.0, 0.4, 0.5), Color(0.15, 0.15, 0.15, 0.7), 20, 1.1, 1.0, 2.2, 0.16)
 
+	# لهب النيترو الأزرق من العوادم
+	_boost_flame_l = _make_flame(Vector3(-0.35, -0.1, 1.2))
+	_boost_flame_r = _make_flame(Vector3(0.35, -0.1, 1.2))
+
+
+func _make_flame(pos: Vector3) -> GPUParticles3D:
+	var p := GPUParticles3D.new()
+	var mat := ParticleProcessMaterial.new()
+	mat.direction = Vector3(0.0, 0.0, 1.0)
+	mat.spread = 12.0
+	mat.initial_velocity_min = 8.0
+	mat.initial_velocity_max = 12.0
+	mat.gravity = Vector3.ZERO
+	mat.scale_min = 0.5
+	mat.scale_max = 1.2
+	mat.color = Color(0.4, 0.65, 1.0, 0.85)
+	p.process_material = mat
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.13
+	mesh.height = 0.26
+	var mm := StandardMaterial3D.new()
+	mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mm.albedo_color = Color(0.45, 0.7, 1.0, 0.85)
+	mesh.material = mm
+	p.draw_pass_1 = mesh
+	p.amount = 30
+	p.lifetime = 0.35
+	p.local_coords = false
+	p.emitting = false
+	p.position = pos
+	add_child(p)
+	return p
+
 
 func _build_sounds() -> void:
 	if not sounds_enabled:
@@ -797,6 +1007,16 @@ func _build_sounds() -> void:
 	_gun_snd.volume_db = -6.0
 	_gun_snd.max_distance = 70.0
 	add_child(_gun_snd)
+
+	var boost_stream: AudioStreamWAV = load("res://assets/sfx/boost.wav")
+	boost_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	boost_stream.loop_begin = int(boost_stream.data.size() / 2 * 0.3)
+	boost_stream.loop_end = boost_stream.data.size() / 2
+	_boost_snd = AudioStreamPlayer3D.new()
+	_boost_snd.stream = boost_stream
+	_boost_snd.volume_db = -4.0
+	_boost_snd.max_distance = 60.0
+	add_child(_boost_snd)
 
 
 func _mat(c: Color) -> StandardMaterial3D:
