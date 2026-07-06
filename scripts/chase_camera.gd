@@ -1,8 +1,7 @@
 class_name ChaseCamera
 extends Camera3D
 
-# كاميرا مطاردة ناعمة: تلحق السيارة من الخلف
-# وتوسع زاوية الرؤية (FOV) كلما زادت السرعة = إحساس سرعة
+# كاميرا مطاردة ناعمة + اهتزاز عند الانفجارات والإصابات
 
 @export var target: Node3D
 @export var distance := 6.5
@@ -10,6 +9,12 @@ extends Camera3D
 @export var follow_speed := 6.0
 @export var base_fov := 72.0
 @export var max_fov := 84.0
+
+var _trauma := 0.0
+
+
+func add_trauma(amount: float) -> void:
+	_trauma = clampf(_trauma + amount, 0.0, 1.0)
 
 
 func _ready() -> void:
@@ -34,6 +39,16 @@ func _physics_process(delta: float) -> void:
 		spd = (target as RigidBody3D).linear_velocity.length()
 	var target_fov := lerpf(base_fov, max_fov, clampf(spd / 28.0, 0.0, 1.0))
 	fov = lerpf(fov, target_fov, 1.0 - exp(-4.0 * delta))
+
+	# اهتزاز الكاميرا
+	if _trauma > 0.0:
+		_trauma = maxf(_trauma - delta * 1.6, 0.0)
+		var shake := _trauma * _trauma
+		h_offset = randf_range(-1.0, 1.0) * shake * 0.45
+		v_offset = randf_range(-1.0, 1.0) * shake * 0.45
+	else:
+		h_offset = 0.0
+		v_offset = 0.0
 
 
 func _flat_forward() -> Vector3:

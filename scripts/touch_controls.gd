@@ -2,22 +2,29 @@ class_name TouchControls
 extends Control
 
 # ============================================================
-#  تحكم اللمس:
-#  - النص الأيسر من الشاشة: جويستيك ديناميكي (يظهر وين ما تلمس)
-#  - يمين: زر DRIFT + زر BRAKE (بريك/رجوع)
-#  - التسارع تلقائي (المعيار بألعاب سيارات الموبايل)
-#  - يدمج الكيبورد تلقائياً للتجربة على الحاسبة
+#  تحكم اللمس - المرحلة 4:
+#  يسار: جويستيك ديناميكي
+#  يمين: FIRE (رشاش) + SPEC (السلاح الخاص + العدد)
+#         + بدّل + DRIFT + BRAKE — كلها تشتغل سوية
 # ============================================================
 
 const JOY_RADIUS := 110.0
 const KNOB_RADIUS := 42.0
-const DRIFT_RADIUS := 92.0
-const BRAKE_RADIUS := 70.0
+const FIRE_RADIUS := 95.0
+const SPEC_RADIUS := 64.0
+const CYCLE_RADIUS := 38.0
+const DRIFT_RADIUS := 68.0
+const BRAKE_RADIUS := 56.0
+
+var special_text := "-"
 
 var _steer_touch := -1
 var _steer_origin := Vector2.ZERO
 var _steer_pos := Vector2.ZERO
 var _touch_steer := 0.0
+var _fire_touch := -1
+var _spec_touch := -1
+var _cycle_touch := -1
 var _drift_touch := -1
 var _brake_touch := -1
 
@@ -25,6 +32,11 @@ var _brake_touch := -1
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_preset(Control.PRESET_FULL_RECT)
+
+
+func set_special_text(t: String) -> void:
+	special_text = t
+	queue_redraw()
 
 
 # ---------- الواجهة اللي تقرأها السيارة ----------
@@ -48,7 +60,19 @@ func is_braking() -> bool:
 	return _brake_touch != -1 or Input.is_action_pressed("ui_down") or Input.is_key_pressed(KEY_S)
 
 
-# ---------- معالجة اللمس (متعدد الأصابع) ----------
+func is_firing() -> bool:
+	return _fire_touch != -1 or Input.is_key_pressed(KEY_F) or Input.is_key_pressed(KEY_ENTER)
+
+
+func is_special_pressed() -> bool:
+	return _spec_touch != -1 or Input.is_key_pressed(KEY_Q)
+
+
+func is_cycle_pressed() -> bool:
+	return _cycle_touch != -1 or Input.is_key_pressed(KEY_E)
+
+
+# ---------- معالجة اللمس ----------
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
@@ -61,11 +85,17 @@ func _input(event: InputEvent) -> void:
 
 
 func _on_touch_down(index: int, pos: Vector2) -> void:
-	if pos.distance_to(_drift_center()) <= DRIFT_RADIUS:
+	if pos.distance_to(_fire_center()) <= FIRE_RADIUS:
+		_fire_touch = index
+	elif pos.distance_to(_spec_center()) <= SPEC_RADIUS:
+		_spec_touch = index
+	elif pos.distance_to(_cycle_center()) <= CYCLE_RADIUS:
+		_cycle_touch = index
+	elif pos.distance_to(_drift_center()) <= DRIFT_RADIUS:
 		_drift_touch = index
 	elif pos.distance_to(_brake_center()) <= BRAKE_RADIUS:
 		_brake_touch = index
-	elif pos.x < size.x * 0.55:
+	elif pos.x < size.x * 0.5:
 		_steer_touch = index
 		_steer_origin = pos
 		_steer_pos = pos
@@ -88,6 +118,12 @@ func _on_touch_up(index: int) -> void:
 	if index == _steer_touch:
 		_steer_touch = -1
 		_touch_steer = 0.0
+	if index == _fire_touch:
+		_fire_touch = -1
+	if index == _spec_touch:
+		_spec_touch = -1
+	if index == _cycle_touch:
+		_cycle_touch = -1
 	if index == _drift_touch:
 		_drift_touch = -1
 	if index == _brake_touch:
@@ -107,8 +143,11 @@ func _draw() -> void:
 		draw_arc(hint, 70.0, 0.0, TAU, 40, Color(1, 1, 1, 0.12), 3.0)
 		_draw_label(hint, "STEER", 18, Color(1, 1, 1, 0.25))
 
+	_draw_button(_fire_center(), FIRE_RADIUS, "FIRE", _fire_touch != -1, Color(0.95, 0.25, 0.2))
+	_draw_button(_spec_center(), SPEC_RADIUS, special_text, _spec_touch != -1, Color(0.62, 0.3, 0.85))
+	_draw_button(_cycle_center(), CYCLE_RADIUS, "بدّل", _cycle_touch != -1, Color(0.3, 0.32, 0.38))
 	_draw_button(_drift_center(), DRIFT_RADIUS, "DRIFT", _drift_touch != -1, Color(1.0, 0.55, 0.1))
-	_draw_button(_brake_center(), BRAKE_RADIUS, "BRAKE", _brake_touch != -1, Color(0.9, 0.2, 0.2))
+	_draw_button(_brake_center(), BRAKE_RADIUS, "BRAKE", _brake_touch != -1, Color(0.35, 0.55, 0.9))
 
 
 func _draw_button(center: Vector2, radius: float, label: String, pressed: bool, color: Color) -> void:
@@ -116,7 +155,8 @@ func _draw_button(center: Vector2, radius: float, label: String, pressed: bool, 
 	fill.a = 0.55 if pressed else 0.22
 	draw_circle(center, radius, fill)
 	draw_arc(center, radius, 0.0, TAU, 48, Color(color.r, color.g, color.b, 0.8), 3.0)
-	_draw_label(center, label, 24, Color(1, 1, 1, 0.9))
+	var fs := 24 if radius > 50.0 else 17
+	_draw_label(center, label, fs, Color(1, 1, 1, 0.9))
 
 
 func _draw_label(center: Vector2, text: String, font_size: int, color: Color) -> void:
@@ -125,9 +165,21 @@ func _draw_label(center: Vector2, text: String, font_size: int, color: Color) ->
 	draw_string(ThemeDB.fallback_font, pos, text, HORIZONTAL_ALIGNMENT_CENTER, w, font_size, color)
 
 
+func _fire_center() -> Vector2:
+	return Vector2(size.x - 135.0, size.y - 145.0)
+
+
+func _spec_center() -> Vector2:
+	return Vector2(size.x - 140.0, size.y - 348.0)
+
+
+func _cycle_center() -> Vector2:
+	return Vector2(size.x - 140.0, size.y - 478.0)
+
+
 func _drift_center() -> Vector2:
-	return Vector2(size.x - 140.0, size.y - 150.0)
+	return Vector2(size.x - 320.0, size.y - 125.0)
 
 
 func _brake_center() -> Vector2:
-	return Vector2(size.x - 330.0, size.y - 120.0)
+	return Vector2(size.x - 335.0, size.y - 295.0)

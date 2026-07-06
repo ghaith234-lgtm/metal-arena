@@ -4,9 +4,14 @@ config_version=5
 [application]
 
 config/name="Metal Arena"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/menu.tscn"
 config/features=PackedStringArray("4.3")
 config/icon="res://icon.svg"
+
+[autoload]
+
+Global="*res://scripts/global.gd"
+Fx="*res://scripts/fx.gd"
 
 [display]
 
