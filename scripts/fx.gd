@@ -63,6 +63,14 @@ func explosion(pos: Vector3, damage: float, radius: float, launch_dv: float, att
 		if damage > 0.0:
 			c.take_damage(damage * f, attacker)
 
+	# ضرر على المباني والأشجار القريبة
+	for obj in get_tree().get_nodes_in_group("destructibles"):
+		var d: float = obj.global_position.distance_to(pos)
+		if d > reach:
+			continue
+		var f := 1.0 - d / reach
+		obj.take_damage(damage * f * 1.5, attacker)
+
 	var amount := int(55 * strength)
 	var p := _burst_particles(Color(1.0, 0.55, 0.15), amount, 0.9 * strength, 6.0 * strength, 17.0 * strength, 0.22 * strength)
 	scene.add_child(p)

@@ -351,6 +351,9 @@ func _try_fire(delta: float) -> void:
 		if col is ArcadeCar:
 			col.take_damage(gun_damage, self)
 			hit_landed.emit()
+		elif col is Destructible:
+			col.take_damage(gun_damage, self)
+			hit_landed.emit()
 
 	_spawn_tracer(from, end)
 	_muzzle.light_energy = 3.0
@@ -785,89 +788,204 @@ func _build_body() -> void:
 	_visual_root = Node3D.new()
 	add_child(_visual_root)
 
-	var body := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(1.3, 0.45, 2.2)
+	# الهيكل السفلي العريض (chassis)
+	var chassis := MeshInstance3D.new()
+	var chm := BoxMesh.new()
+	chm.size = Vector3(1.35, 0.28, 2.25)
+	var chassis_mat := _mat(Color(0.11, 0.11, 0.13))
+	chassis_mat.metallic = 0.5
+	chassis_mat.roughness = 0.4
+	chm.material = chassis_mat
+	chassis.mesh = chm
+	chassis.position = Vector3(0.0, -0.12, 0.0)
+	_visual_root.add_child(chassis)
+
+	# جسم رئيسي ملوّن أعرض بالوسط ومدبب للأمام والخلف
 	_body_mat = _mat(body_color)
 	_body_mat.emission = Color(1.0, 0.35, 0.25)
-	bm.material = _body_mat
-	body.mesh = bm
-	_visual_root.add_child(body)
+	_body_mat.metallic = 0.35
+	_body_mat.roughness = 0.35
 
-	var cabin := MeshInstance3D.new()
-	var cm := BoxMesh.new()
-	cm.size = Vector3(1.0, 0.35, 1.0)
-	var cab_mat := _mat(Color(0.1, 0.13, 0.18))
-	cab_mat.roughness = 0.15
-	cab_mat.metallic = 0.55
-	cm.material = cab_mat
-	cabin.mesh = cm
-	cabin.position = Vector3(0.0, 0.38, 0.1)
-	_visual_root.add_child(cabin)
+	var mid := MeshInstance3D.new()
+	var midm := BoxMesh.new()
+	midm.size = Vector3(1.28, 0.34, 1.5)
+	midm.material = _body_mat
+	mid.mesh = midm
+	mid.position = Vector3(0.0, 0.12, 0.0)
+	_visual_root.add_child(mid)
+
+	# مقدمة مدببة (prism) - الرأس للأمام
+	var front := MeshInstance3D.new()
+	var frontm := PrismMesh.new()
+	frontm.size = Vector3(1.28, 0.85, 0.34)   # X=عرض، Y=طول المثلث، Z=سماكة
+	frontm.material = _body_mat
+	front.mesh = frontm
+	front.rotation.x = -PI / 2.0               # ننيّم المثلث حتى رأسه للأمام (-Z)
+	front.position = Vector3(0.0, 0.12, -1.15)
+	_visual_root.add_child(front)
+
+	# غطاء المحرك المنحدر
+	var hood := MeshInstance3D.new()
+	var hoodm := BoxMesh.new()
+	hoodm.size = Vector3(1.1, 0.12, 0.7)
+	hoodm.material = _body_mat
+	hood.mesh = hoodm
+	hood.position = Vector3(0.0, 0.28, -0.55)
+	hood.rotation.x = -0.12
+	_visual_root.add_child(hood)
+
+	# الكابينة المنحدرة (windshield + roof)
+	var glass_mat := _mat(Color(0.15, 0.22, 0.3))
+	glass_mat.metallic = 0.7
+	glass_mat.roughness = 0.08
+
+	var windshield := MeshInstance3D.new()
+	var wsm := BoxMesh.new()
+	wsm.size = Vector3(0.95, 0.4, 0.5)
+	wsm.material = glass_mat
+	windshield.mesh = wsm
+	windshield.position = Vector3(0.0, 0.42, -0.15)
+	windshield.rotation.x = 0.42
+	_visual_root.add_child(windshield)
+
+	var roof := MeshInstance3D.new()
+	var roofm := BoxMesh.new()
+	roofm.size = Vector3(0.92, 0.32, 0.75)
+	var roof_mat := _mat(body_color.darkened(0.15))
+	roof_mat.metallic = 0.35
+	roofm.material = roof_mat
+	roof.mesh = roofm
+	roof.position = Vector3(0.0, 0.5, 0.3)
+	_visual_root.add_child(roof)
+
+	# قوس حماية (roll bar) خلف الكابينة
+	var bar_mat := _mat(Color(0.2, 0.2, 0.23))
+	bar_mat.metallic = 0.8
+	bar_mat.roughness = 0.3
+	var rollbar := MeshInstance3D.new()
+	var rbm := CylinderMesh.new()
+	rbm.top_radius = 0.05
+	rbm.bottom_radius = 0.05
+	rbm.height = 0.9
+	rbm.material = bar_mat
+	rollbar.mesh = rbm
+	rollbar.rotation.z = PI / 2.0
+	rollbar.position = Vector3(0.0, 0.6, 0.62)
+	_visual_root.add_child(rollbar)
+
+	# تنانير جانبية (side skirts)
+	var skirt_mat := _mat(Color(0.09, 0.09, 0.11))
+	for sx in [-0.68, 0.68]:
+		var skirt := MeshInstance3D.new()
+		var skm := BoxMesh.new()
+		skm.size = Vector3(0.08, 0.16, 1.7)
+		skm.material = skirt_mat
+		skirt.mesh = skm
+		skirt.position = Vector3(sx, -0.05, 0.0)
+		_visual_root.add_child(skirt)
+
+	# أقواس العجلات (fenders)
+	var fender_mat := _mat(body_color.darkened(0.25))
+	for zpos in [-0.85, 0.85]:
+		for sx in [-0.7, 0.7]:
+			var fender := MeshInstance3D.new()
+			var fm := BoxMesh.new()
+			fm.size = Vector3(0.12, 0.2, 0.7)
+			fm.material = fender_mat
+			fender.mesh = fm
+			fender.position = Vector3(sx, 0.05, zpos)
+			_visual_root.add_child(fender)
+
+	# رشاش فوق الكابينة
+	var gun_mat := _mat(Color(0.15, 0.16, 0.2))
+	gun_mat.metallic = 0.7
+	gun_mat.roughness = 0.3
+	var gun_base := MeshInstance3D.new()
+	var gbm := BoxMesh.new()
+	gbm.size = Vector3(0.2, 0.12, 0.2)
+	gbm.material = gun_mat
+	gun_base.mesh = gbm
+	gun_base.position = Vector3(0.0, 0.68, -0.1)
+	_visual_root.add_child(gun_base)
 
 	var gun := MeshInstance3D.new()
-	var gm := BoxMesh.new()
-	gm.size = Vector3(0.14, 0.14, 0.9)
-	gm.material = _mat(Color(0.2, 0.22, 0.26))
+	var gm := CylinderMesh.new()
+	gm.top_radius = 0.05
+	gm.bottom_radius = 0.06
+	gm.height = 0.85
+	gm.material = gun_mat
 	gun.mesh = gm
-	gun.position = Vector3(0.0, 0.28, -0.9)
+	gun.rotation.x = PI / 2.0
+	gun.position = Vector3(0.0, 0.68, -0.6)
 	_visual_root.add_child(gun)
 
-	# صادم أمامي
+	# صادم أمامي معدني
 	var bumper := MeshInstance3D.new()
 	var bump := BoxMesh.new()
-	bump.size = Vector3(1.25, 0.18, 0.18)
-	bump.material = _mat(Color(0.16, 0.17, 0.2))
+	bump.size = Vector3(1.3, 0.16, 0.2)
+	bump.material = bar_mat
 	bumper.mesh = bump
-	bumper.position = Vector3(0.0, -0.08, -1.14)
+	bumper.position = Vector3(0.0, -0.05, -1.28)
 	_visual_root.add_child(bumper)
 
-	# جناح خلفي (سبويلر)
-	var wing_mat := _mat(Color(0.13, 0.14, 0.17))
+	# قضبان الصادم
 	for sx in [-0.4, 0.4]:
+		var guard := MeshInstance3D.new()
+		var gdm := BoxMesh.new()
+		gdm.size = Vector3(0.08, 0.35, 0.1)
+		gdm.material = bar_mat
+		guard.mesh = gdm
+		guard.position = Vector3(sx, 0.05, -1.3)
+		_visual_root.add_child(guard)
+
+	# جناح خلفي (سبويلر) على حاملين
+	var wing_mat := _mat(Color(0.13, 0.14, 0.17))
+	wing_mat.metallic = 0.4
+	for sx in [-0.45, 0.45]:
 		var post := MeshInstance3D.new()
 		var pmesh := BoxMesh.new()
-		pmesh.size = Vector3(0.08, 0.24, 0.08)
+		pmesh.size = Vector3(0.07, 0.28, 0.08)
 		pmesh.material = wing_mat
 		post.mesh = pmesh
-		post.position = Vector3(sx, 0.33, 1.0)
+		post.position = Vector3(sx, 0.42, 1.02)
 		_visual_root.add_child(post)
 	var wing := MeshInstance3D.new()
 	var wmesh := BoxMesh.new()
-	wmesh.size = Vector3(1.25, 0.07, 0.32)
+	wmesh.size = Vector3(1.3, 0.06, 0.35)
 	wmesh.material = wing_mat
 	wing.mesh = wmesh
-	wing.position = Vector3(0.0, 0.48, 1.02)
+	wing.position = Vector3(0.0, 0.57, 1.04)
+	wing.rotation.x = -0.15
 	_visual_root.add_child(wing)
 
-	# عوادم
-	var ex_mat := _mat(Color(0.35, 0.36, 0.4))
-	ex_mat.metallic = 0.8
-	ex_mat.roughness = 0.3
-	for sx in [-0.35, 0.35]:
+	# عوادم مزدوجة
+	var ex_mat := _mat(Color(0.4, 0.41, 0.45))
+	ex_mat.metallic = 0.9
+	ex_mat.roughness = 0.2
+	for sx in [-0.4, -0.25, 0.25, 0.4]:
 		var ex := MeshInstance3D.new()
 		var emesh := CylinderMesh.new()
-		emesh.top_radius = 0.06
-		emesh.bottom_radius = 0.06
-		emesh.height = 0.3
+		emesh.top_radius = 0.05
+		emesh.bottom_radius = 0.05
+		emesh.height = 0.25
 		emesh.material = ex_mat
 		ex.mesh = emesh
 		ex.rotation.x = PI / 2.0
-		ex.position = Vector3(sx, -0.1, 1.12)
+		ex.position = Vector3(sx, -0.08, 1.18)
 		_visual_root.add_child(ex)
 
-	# مصابيح أمامية (مضيئة)
+	# مصابيح أمامية مضيئة
 	var head_mat := _mat(Color(1.0, 0.95, 0.7))
 	head_mat.emission_enabled = true
 	head_mat.emission = Color(1.0, 0.9, 0.55)
-	head_mat.emission_energy_multiplier = 1.4
-	for sx in [-0.42, 0.42]:
+	head_mat.emission_energy_multiplier = 1.6
+	for sx in [-0.45, 0.45]:
 		var hl := MeshInstance3D.new()
 		var hmesh := BoxMesh.new()
-		hmesh.size = Vector3(0.22, 0.1, 0.06)
+		hmesh.size = Vector3(0.24, 0.12, 0.05)
 		hmesh.material = head_mat
 		hl.mesh = hmesh
-		hl.position = Vector3(sx, 0.08, -1.12)
+		hl.position = Vector3(sx, 0.12, -1.36)
 		_visual_root.add_child(hl)
 
 	# مصابيح خلفية (تشتد مع البريك)
@@ -875,23 +993,14 @@ func _build_body() -> void:
 	_tail_mat.emission_enabled = true
 	_tail_mat.emission = Color(1.0, 0.12, 0.06)
 	_tail_mat.emission_energy_multiplier = 0.35
-	for sx in [-0.45, 0.45]:
+	for sx in [-0.48, 0.48]:
 		var tl := MeshInstance3D.new()
 		var tmesh := BoxMesh.new()
-		tmesh.size = Vector3(0.22, 0.1, 0.06)
+		tmesh.size = Vector3(0.2, 0.1, 0.05)
 		tmesh.material = _tail_mat
 		tl.mesh = tmesh
-		tl.position = Vector3(sx, 0.1, 1.12)
+		tl.position = Vector3(sx, 0.14, 1.2)
 		_visual_root.add_child(tl)
-
-	# مقدمة صفراء (اتجاه)
-	var nose := MeshInstance3D.new()
-	var nm := BoxMesh.new()
-	nm.size = Vector3(0.5, 0.12, 0.25)
-	nm.material = _mat(Color(1.0, 0.85, 0.2))
-	nose.mesh = nm
-	nose.position = Vector3(0.0, 0.15, -1.15)
-	_visual_root.add_child(nose)
 
 
 func _build_wheels() -> void:

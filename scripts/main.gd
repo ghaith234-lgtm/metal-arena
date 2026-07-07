@@ -28,6 +28,8 @@ const SPECIAL_CODES = {"rocket": "R", "homing": "H", "mine": "M"}
 var car: ArcadeCar
 var controls: TouchControls
 var _cam: ChaseCamera
+var _radar: Radar
+var _dummies: Array = []
 var _speed_label: Label
 var _kills_label: Label
 var _ammo_label: Label
@@ -103,30 +105,96 @@ func _build_environment() -> void:
 func _build_arena() -> void:
 	var half := ARENA_SIZE / 2.0
 
-	_add_box(Vector3(0, -0.5, 0), Vector3(ARENA_SIZE, 1.0, ARENA_SIZE), Color(0.17, 0.18, 0.2))
+	# أرضية حشائش
+	_add_ground(Vector3(0, -0.5, 0), Vector3(ARENA_SIZE, 1.0, ARENA_SIZE), Color(0.28, 0.42, 0.2))
 
-	var wall_c := Color(0.75, 0.3, 0.12)
+	# شبكة شوارع (رمادية) متقاطعة
+	var road_c := Color(0.22, 0.22, 0.24)
+	var line_c := Color(0.85, 0.8, 0.3)
+	for x in [-36.0, 0.0, 36.0]:
+		_add_ground(Vector3(x, 0.02, 0), Vector3(8.0, 0.06, ARENA_SIZE), road_c)
+	for z in [-36.0, 0.0, 36.0]:
+		_add_ground(Vector3(0, 0.02, z), Vector3(ARENA_SIZE, 0.06, 8.0), road_c)
+	# خطوط منتصف الشارع
+	for x in [-36.0, 0.0, 36.0]:
+		for i in range(-5, 6):
+			_add_ground(Vector3(x, 0.05, i * 10.0), Vector3(0.4, 0.02, 3.0), line_c)
+
+	# جدران محيطة
+	var wall_c := Color(0.4, 0.42, 0.48)
 	_add_box(Vector3(0, 2.0, -half), Vector3(ARENA_SIZE + 4.0, 4.0, 2.0), wall_c)
 	_add_box(Vector3(0, 2.0, half), Vector3(ARENA_SIZE + 4.0, 4.0, 2.0), wall_c)
 	_add_box(Vector3(-half, 2.0, 0), Vector3(2.0, 4.0, ARENA_SIZE + 4.0), wall_c)
 	_add_box(Vector3(half, 2.0, 0), Vector3(2.0, 4.0, ARENA_SIZE + 4.0), wall_c)
 
-	var ramp_c := Color(0.85, 0.7, 0.2)
-	_add_box(Vector3(18, 0.85, -12), Vector3(9.0, 0.5, 8.0), ramp_c, Vector3(-16.0, 0.0, 0.0))
-	_add_box(Vector3(-20, 0.85, 15), Vector3(9.0, 0.5, 8.0), ramp_c, Vector3(-16.0, 180.0, 0.0))
-	_add_box(Vector3(-5, 0.85, -30), Vector3(9.0, 0.5, 8.0), ramp_c, Vector3(-16.0, 90.0, 0.0))
+	# منحدرات للقفز
+	var ramp_c := Color(0.7, 0.6, 0.25)
+	_add_box(Vector3(18, 0.85, -18), Vector3(8.0, 0.5, 7.0), ramp_c, Vector3(-16.0, 0.0, 0.0))
+	_add_box(Vector3(-18, 0.85, 18), Vector3(8.0, 0.5, 7.0), ramp_c, Vector3(-16.0, 180.0, 0.0))
 
-	var pillar_c := Color(0.35, 0.4, 0.5)
-	var spots := [
-		Vector3(0, 1.5, 12),
-		Vector3(10, 1.5, 28),
-		Vector3(-14, 1.5, -8),
-		Vector3(25, 1.5, 20),
-		Vector3(-30, 1.5, -22),
-		Vector3(30, 1.5, -30),
+	_spawn_destructibles()
+
+
+func _spawn_destructibles() -> void:
+	# بنايات بمواقع الأحياء (بين الشوارع)
+	var building_spots = [
+		[Vector3(-18, 0, -18), Destructible.Kind.BUILDING_TALL],
+		[Vector3(18, 0, 18), Destructible.Kind.BUILDING_TALL],
+		[Vector3(-18, 0, 18), Destructible.Kind.BUILDING_SMALL],
+		[Vector3(18, 0, -18), Destructible.Kind.BUILDING_SMALL],
+		[Vector3(-52, 0, 0), Destructible.Kind.BUILDING_SMALL],
+		[Vector3(52, 0, 0), Destructible.Kind.BUILDING_TALL],
+		[Vector3(0, 0, -52), Destructible.Kind.BUILDING_SMALL],
+		[Vector3(0, 0, 52), Destructible.Kind.BUILDING_TALL],
 	]
-	for s in spots:
-		_add_box(s, Vector3(2.5, 3.0, 2.5), pillar_c)
+	for spot in building_spots:
+		_add_destructible(spot[0], spot[1])
+
+	# أشجار على حواف الشوارع
+	var tree_spots = [
+		Vector3(-6, 0, -6), Vector3(6, 0, 6), Vector3(-6, 0, 30), Vector3(6, 0, -30),
+		Vector3(-30, 0, 6), Vector3(30, 0, -6), Vector3(-42, 0, -42), Vector3(42, 0, 42),
+		Vector3(12, 0, 42), Vector3(-12, 0, -42), Vector3(42, 0, -12), Vector3(-42, 0, 12),
+		Vector3(24, 0, 24), Vector3(-24, 0, -24),
+	]
+	for t in tree_spots:
+		_add_destructible(t, Destructible.Kind.TREE)
+
+	# براميل متفجرة (خطر ومتعة)
+	var barrel_spots = [
+		Vector3(-14, 0, -22), Vector3(14, 0, 22), Vector3(-22, 0, 14), Vector3(22, 0, -14),
+		Vector3(0, 0, 8), Vector3(8, 0, 0), Vector3(-40, 0, -8), Vector3(40, 0, 8),
+	]
+	for bpos in barrel_spots:
+		_add_destructible(bpos, Destructible.Kind.BARREL)
+
+
+func _add_destructible(pos: Vector3, kind: int) -> void:
+	var d := Destructible.new()
+	add_child(d)
+	d.setup(kind)
+	d.global_position = pos
+
+
+func _add_ground(pos: Vector3, box_size: Vector3, color: Color) -> void:
+	# أرضية بدون تصادم جانبي مؤثر (مسطحة)
+	var body := StaticBody3D.new()
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = box_size
+	col.shape = shape
+	body.add_child(col)
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = box_size
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = 0.95
+	bm.material = mat
+	mi.mesh = bm
+	body.add_child(mi)
+	add_child(body)
+	body.position = pos
 
 
 func _add_box(pos: Vector3, box_size: Vector3, color: Color, rot: Vector3 = Vector3.ZERO) -> void:
@@ -252,6 +320,15 @@ func _build_ui() -> void:
 	menu_btn.pressed.connect(func() -> void: get_tree().change_scene_to_file("res://scenes/menu.tscn"))
 	layer.add_child(menu_btn)
 
+	# الرادار (خريطة الأعداء) فوق يمين تحت عداد القتل
+	_radar = Radar.new()
+	_radar.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_radar.offset_left = -210
+	_radar.offset_top = 60
+	_radar.offset_right = -20
+	_radar.offset_bottom = 250
+	layer.add_child(_radar)
+
 
 # ---------- السيارات والصناديق ----------
 
@@ -285,6 +362,10 @@ func _spawn_dummies() -> void:
 		d.rotation.y = randf() * TAU
 		add_child(d)
 		d.died.connect(_on_dummy_died)
+		_dummies.append(d)
+	# نربط الرادار بالأعداء بعد ما ينخلقون
+	if _radar != null and car != null:
+		_radar.setup(car, _dummies)
 
 
 func _spawn_pickups() -> void:

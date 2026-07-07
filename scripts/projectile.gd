@@ -17,6 +17,7 @@ var turn_rate := 0.0        # راديان/ثانية (0 = مستقيم)
 var life := 5.0
 
 var _beep_t := 0.3
+var _armed := 0.0
 
 
 func _ready() -> void:
@@ -68,6 +69,7 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	life -= delta
+	_armed += delta
 	if life <= 0.0:
 		_explode(global_position)
 		return
@@ -87,13 +89,13 @@ func _physics_process(delta: float) -> void:
 
 	var next := global_position + direction * speed * delta
 	var query := PhysicsRayQueryParameters3D.create(global_position, next)
+	query.collide_with_bodies = true
+	query.collide_with_areas = false
 	if owner_car != null:
 		query.exclude = [owner_car.get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if not hit.is_empty():
-		var col = hit["collider"]
-		if col is ArcadeCar:
-			col.take_damage(damage * 0.5, owner_car)
+		# الانفجار نفسه يوزع الضرر بمنطقة (بضمنها السيارة المصابة)
 		_explode(hit["position"])
 		return
 
