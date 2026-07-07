@@ -8,7 +8,7 @@ extends StaticBody3D
 
 signal destroyed(pos)
 
-enum Kind { TREE, BUILDING_SMALL, BUILDING_TALL, BARREL }
+enum Kind { TREE, BUILDING_SMALL, BUILDING_TALL, BARREL, NUKE_CRATE }
 
 @export var kind: Kind = Kind.TREE
 var health := 40.0
@@ -41,6 +41,10 @@ func setup(k: Kind) -> void:
 			max_health = 18.0
 			_build_barrel()
 			_debris_color = Color(0.8, 0.4, 0.1)
+		Kind.NUKE_CRATE:
+			max_health = 300.0
+			_build_nuke_crate()
+			_debris_color = Color(0.9, 0.75, 0.1)
 	health = max_health
 
 
@@ -73,6 +77,9 @@ func _destroy() -> void:
 	# البراميل تنفجر
 	if kind == Kind.BARREL:
 		Fx.explosion(global_position + Vector3.UP * 0.5, 28.0, 4.5, 8.0, null, 1.1)
+	elif kind == Kind.NUKE_CRATE:
+		# صندوق النووي: صوت خاص، الإشارة تكفي (اللعبة تخلق السلاح)
+		Fx.sound(global_position, "explosion", -2.0, 0.6)
 	else:
 		Fx.sound(global_position, "explosion", -4.0, 0.7)
 	# إزالة التصادم فوراً والاختفاء
@@ -243,3 +250,59 @@ func _build_barrel() -> void:
 	_visual.add_child(stripe)
 
 	_add_col(Vector3(0.7, 0.95, 0.7), 0.48)
+
+
+func _build_nuke_crate() -> void:
+	_visual = Node3D.new()
+	add_child(_visual)
+
+	# صندوق عسكري كبير
+	var box := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(2.4, 2.0, 2.4)
+	var mat := _mat(Color(0.35, 0.38, 0.3), 0.6)
+	mat.metallic = 0.4
+	bm.material = mat
+	box.mesh = bm
+	box.position.y = 1.0
+	_visual.add_child(box)
+
+	# أشرطة صفراء/سوداء تحذيرية على الحواف
+	var stripe_mat := _mat(Color(0.9, 0.8, 0.1), 0.5)
+	for yy in [0.35, 1.65]:
+		var stripe := MeshInstance3D.new()
+		var sm := BoxMesh.new()
+		sm.size = Vector3(2.5, 0.25, 2.5)
+		sm.material = stripe_mat
+		stripe.mesh = sm
+		stripe.position.y = yy
+		_visual.add_child(stripe)
+
+	# رمز إشعاع مضيء على الوجوه (دائرة صفراء)
+	var sym_mat := StandardMaterial3D.new()
+	sym_mat.albedo_color = Color(1.0, 0.85, 0.0)
+	sym_mat.emission_enabled = true
+	sym_mat.emission = Color(1.0, 0.8, 0.0)
+	sym_mat.emission_energy_multiplier = 1.5
+	_mats.append(sym_mat)
+	for face in [Vector3(0, 1, 2.45 * 0.5 + 0.01), Vector3(0, 1, -(2.45 * 0.5 + 0.01))]:
+		var sym := MeshInstance3D.new()
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = 0.6
+		cyl.bottom_radius = 0.6
+		cyl.height = 0.05
+		cyl.material = sym_mat
+		sym.mesh = cyl
+		sym.rotation.x = PI / 2.0
+		sym.position = face
+		_visual.add_child(sym)
+
+	# ضوء أصفر ينبض (يلفت الأنظار)
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.8, 0.0)
+	light.light_energy = 2.0
+	light.omni_range = 8.0
+	light.position.y = 1.5
+	_visual.add_child(light)
+
+	_add_col(Vector3(2.4, 2.0, 2.4), 1.0)

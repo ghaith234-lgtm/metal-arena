@@ -14,6 +14,8 @@ var _name_label: Label
 var _desc_label: Label
 var _counter_label: Label
 var _battle_btn: Button
+var _ai_btn: Button
+var _mp_btn: Button
 var _stat_fills: Array = []
 var _preview_car: ArcadeCar
 var _index := 0
@@ -127,6 +129,37 @@ func _build_select_page() -> void:
 	back.offset_bottom = 72
 	back.pressed.connect(_show_title)
 	_select_page.add_child(back)
+
+	# اختيار الوضع (فوق يمين)
+	var mode_label := Label.new()
+	mode_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	mode_label.offset_left = -430
+	mode_label.offset_right = -20
+	mode_label.offset_top = 16
+	mode_label.offset_bottom = 44
+	mode_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	mode_label.add_theme_font_size_override("font_size", 20)
+	mode_label.add_theme_color_override("font_color", Color(0.6, 0.62, 0.7))
+	mode_label.text = "الوضع:"
+	_select_page.add_child(mode_label)
+
+	_ai_btn = _make_button("ضد الكمبيوتر", 20, Color(0.85, 0.16, 0.1))
+	_ai_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_ai_btn.offset_left = -430
+	_ai_btn.offset_right = -235
+	_ai_btn.offset_top = 46
+	_ai_btn.offset_bottom = 92
+	_ai_btn.pressed.connect(func() -> void: _set_mode(Global.Mode.AI))
+	_select_page.add_child(_ai_btn)
+
+	_mp_btn = _make_button("لاعبين (قريباً)", 20, Color(0.25, 0.27, 0.32))
+	_mp_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_mp_btn.offset_left = -225
+	_mp_btn.offset_right = -20
+	_mp_btn.offset_top = 46
+	_mp_btn.offset_bottom = 92
+	_mp_btn.pressed.connect(func() -> void: _set_mode(Global.Mode.LOCAL_MP))
+	_select_page.add_child(_mp_btn)
 
 	# بطاقة الصورة
 	_portrait_panel = Panel.new()
@@ -312,7 +345,32 @@ func _show_title() -> void:
 func _show_select() -> void:
 	_title_page.visible = false
 	_select_page.visible = true
+	_refresh_mode()
 	_refresh()
+
+
+func _set_mode(m: int) -> void:
+	# اللاعبين المحلي لسه ما تفعّل - نبقى على AI ونبيّن رسالة
+	if m == Global.Mode.LOCAL_MP:
+		_mp_btn.text = "قريباً..."
+		return
+	Global.game_mode = m
+	_refresh_mode()
+
+
+func _refresh_mode() -> void:
+	# نبرز الزر الفعّال
+	var active := Color(0.85, 0.16, 0.1)
+	var inactive := Color(0.25, 0.27, 0.32)
+	_style_button(_ai_btn, active if Global.game_mode == Global.Mode.AI else inactive)
+	_style_button(_mp_btn, Color(0.2, 0.21, 0.24))
+	_mp_btn.text = "لاعبين (قريباً)"
+
+
+func _style_button(b: Button, color: Color) -> void:
+	var normal: StyleBoxFlat = b.get_theme_stylebox("normal")
+	if normal != null:
+		normal.bg_color = color
 
 
 func _prev_character() -> void:

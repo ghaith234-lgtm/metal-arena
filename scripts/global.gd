@@ -8,6 +8,10 @@ extends Node
 
 var selected_character := 0
 
+# أوضاع اللعب
+enum Mode { AI, LOCAL_MP, PRACTICE }
+var game_mode: Mode = Mode.AI      # الافتراضي: ضد الذكاء الاصطناعي
+
 const CHARACTERS = [
 	{
 		"name": "الذيب",

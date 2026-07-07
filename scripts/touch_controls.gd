@@ -33,6 +33,8 @@ var _spec_touch := -1
 var _cycle_touch := -1
 var _mine_touch := -1
 var _boost_touch := -1
+var _detonate_touch := -1
+var show_detonate := false        # يظهر زر التفجير بس بالحالة الحرجة
 var _drift_touch := -1
 var _brake_touch := -1
 
@@ -93,6 +95,15 @@ func is_mine_pressed() -> bool:
 	return _mine_touch != -1 or Input.is_key_pressed(KEY_R)
 
 
+func is_detonate_pressed() -> bool:
+	return _detonate_touch != -1 or Input.is_key_pressed(KEY_X)
+
+
+func set_show_detonate(v: bool) -> void:
+	show_detonate = v
+	queue_redraw()
+
+
 # ---------- الواجهة اللي تقرأها السيارة ----------
 
 func get_steer() -> float:
@@ -151,6 +162,11 @@ func _input(event: InputEvent) -> void:
 
 
 func _on_touch_down(index: int, pos: Vector2) -> void:
+	# زر التفجير له الأولوية بالحالة الحرجة
+	if show_detonate and pos.distance_to(_detonate_center()) <= 100.0:
+		_detonate_touch = index
+		queue_redraw()
+		return
 	if pos.distance_to(_fire_center()) <= FIRE_RADIUS:
 		_fire_touch = index
 	elif pos.distance_to(_spec_center()) <= SPEC_RADIUS:
@@ -201,6 +217,8 @@ func _on_touch_up(index: int) -> void:
 		_mine_touch = -1
 	if index == _boost_touch:
 		_boost_touch = -1
+	if index == _detonate_touch:
+		_detonate_touch = -1
 	if index == _drift_touch:
 		_drift_touch = -1
 	if index == _brake_touch:
@@ -231,6 +249,15 @@ func _draw() -> void:
 	_draw_boost_button()
 	_draw_button(_drift_center(), DRIFT_RADIUS, "DRIFT", _drift_touch != -1, Color(1.0, 0.55, 0.1))
 	_draw_button(_brake_center(), BRAKE_RADIUS, "BRAKE", _brake_touch != -1, Color(0.35, 0.55, 0.9))
+
+	# زر التفجير (بالحالة الحرجة فقط) - كبير ونابض وسط أسفل الشاشة
+	if show_detonate:
+		var c := _detonate_center()
+		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012)
+		var col := Color(1.0, 0.2, 0.1)
+		draw_circle(c, 100.0, Color(col.r, col.g, col.b, 0.3 + pulse * 0.35))
+		draw_arc(c, 100.0, 0.0, TAU, 48, Color(1.0, 0.5, 0.2, 0.9), 5.0)
+		_draw_label(c, "فجّر!", 40, Color(1, 1, 1, 1))
 
 
 func _draw_mine_button() -> void:
@@ -294,3 +321,8 @@ func _drift_center() -> Vector2:
 
 func _brake_center() -> Vector2:
 	return Vector2(size.x - 445.0, size.y - 285.0)
+
+
+func _detonate_center() -> Vector2:
+	# وسط أسفل الشاشة - سهل الوصول بالإبهامين وقت الذعر
+	return Vector2(size.x / 2.0, size.y - 130.0)

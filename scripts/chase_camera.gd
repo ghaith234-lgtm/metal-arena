@@ -4,11 +4,11 @@ extends Camera3D
 # كاميرا مطاردة ناعمة + اهتزاز عند الانفجارات والإصابات
 
 @export var target: Node3D
-@export var distance := 6.5
-@export var height := 3.0
+@export var distance := 4.8
+@export var height := 2.3
 @export var follow_speed := 6.0
-@export var base_fov := 72.0
-@export var max_fov := 84.0
+@export var base_fov := 68.0
+@export var max_fov := 80.0
 
 var _trauma := 0.0
 

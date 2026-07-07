@@ -6,6 +6,11 @@ extends Node
 
 signal boom(pos: Vector3, strength: float)
 
+# اهتزاز الهاتف (يشتغل بس على الأندرويد/الموبايل)
+func vibrate(ms: int) -> void:
+	if OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]:
+		Input.vibrate_handheld(ms)
+
 const SOUND_PATHS = {
 	"shot": "res://assets/sfx/shot.wav",
 	"hit": "res://assets/sfx/hit.wav",
@@ -14,6 +19,11 @@ const SOUND_PATHS = {
 	"pickup": "res://assets/sfx/pickup.wav",
 	"beep": "res://assets/sfx/beep.wav",
 	"boost": "res://assets/sfx/boost.wav",
+	"alarm": "res://assets/sfx/alarm.wav",
+	"siren": "res://assets/sfx/siren.wav",
+	"helicopter": "res://assets/sfx/helicopter.wav",
+	"nuke_launch": "res://assets/sfx/nuke_launch.wav",
+	"nuke_blast": "res://assets/sfx/nuke_blast.wav",
 }
 
 var _streams := {}

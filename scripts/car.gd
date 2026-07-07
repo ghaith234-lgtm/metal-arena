@@ -8,6 +8,10 @@ extends RigidBody3D
 
 signal died(attacker)
 signal health_changed(current, maximum)
+signal shield_changed(active, time_left)
+signal critical_started(time_left)
+signal critical_tick(time_left)
+signal critical_ended
 signal fired
 signal hit_landed
 signal respawned
@@ -41,7 +45,16 @@ signal mine_charging(ratio)
 @export var gun_damage: float = 5.0       # الرشاش: لا نهائي بس خفيف
 @export var gun_rate: float = 8.0
 @export var gun_range: float = 60.0
+@export var aim_assist: bool = true            # توجيه ذكي للرشاش نحو أقرب عدو
+@export var aim_assist_angle: float = 22.0     # نصف زاوية المخروط (درجات)
+@export var aim_assist_strength: float = 0.75  # 0=بدون، 1=قفل كامل على الهدف
 @export var respawn_delay: float = 4.0
+
+# ---------- الحالة الحرجة (سيارة انتحارية) ----------
+@export var critical_time: float = 5.0         # ثواني قبل الانفجار الذاتي
+@export var critical_blast_damage: float = 60.0 # ضرر الانفجار النهائي
+@export var critical_blast_radius: float = 8.0  # نصف قطر أكبر من العادي
+@export var critical_launch: float = 16.0       # قوة قذف السيارات
 
 # ---------- بوست الاصطدام (نيترو) ----------
 @export var boost_max: float = 100.0
@@ -53,9 +66,27 @@ signal mine_charging(ratio)
 
 var controls: Node = null
 var input_enabled := true
+var ai_controlled := false        # true = تتحكم بيها CarAI عبر الحقول أدناه
+# حقول إدخال الذكاء الاصطناعي
+var ai_steer := 0.0
+var ai_throttle := 0.0
+var ai_drift := false
+var ai_fire := false
+var ai_special := false
+var ai_boost := false
+var ai_detonate := false
 var sounds_enabled := true
 var alive := true
 var health := 100.0
+var shield_time := 0.0            # ثواني الدرع المتبقية
+var critical := false             # الحالة الحرجة (على وشك الانفجار)
+var critical_left := 0.0
+var nuke_carrier := false         # تحمل السلاح النووي حالياً
+var nuke_launch_pressed := false  # ضغطت زر إطلاق النووي
+var _detonate_in := false
+var _detonate_prev := false
+var _last_attacker: Node = null
+var _alarm_snd: AudioStreamPlayer3D
 
 # الأسلحة الخاصة (محدودة العدد)
 var ammo := {"rocket": 0, "homing": 0, "mine": 0}
@@ -86,6 +117,7 @@ var _fire_cooldown := 0.0
 var _special_cooldown := 0.0
 var _flash_timer := 0.0
 var _drift_time := 0.0
+var aim_target: Node3D = null      # الهدف الحالي للتوجيه الذكي (للعرض)
 var _boost := 100.0
 var _boosting := false
 var _boost_in := false
@@ -106,6 +138,8 @@ var _muzzle: OmniLight3D
 var _drift_smoke_l: GPUParticles3D
 var _drift_smoke_r: GPUParticles3D
 var _damage_smoke: GPUParticles3D
+var _shield_mesh: MeshInstance3D
+var _shield_mat: StandardMaterial3D
 var _engine_snd: AudioStreamPlayer3D
 var _drift_snd: AudioStreamPlayer3D
 var _gun_snd: AudioStreamPlayer3D
@@ -138,6 +172,10 @@ func _ready() -> void:
 
 func get_speed_kmh() -> float:
 	return linear_velocity.length() * 3.6
+
+
+func get_boost_ratio() -> float:
+	return _boost / boost_max
 
 
 func set_body_color(c: Color) -> void:
@@ -176,14 +214,37 @@ func _physics_process(delta: float) -> void:
 		if _process_wheel(i):
 			wheels_on_ground += 1
 	_grounded = wheels_on_ground > 0
+	# لو تحمل النووي: زر التفجير يصير زر إطلاق نووي
+	nuke_launch_pressed = nuke_carrier and _detonate_in
 	_apply_drive()
 	_apply_boost(delta)
-	_try_fire(delta)
-	_handle_special(delta)
+	if critical:
+		_update_critical(delta)
+	else:
+		_update_aim_target()
+		_try_fire(delta)
+		_handle_special(delta)
 	_track_drift(delta)
 	_update_visuals(delta)
+	_update_shield(delta)
 	_update_sounds()
 	_check_recovery(delta)
+
+
+func _update_critical(delta: float) -> void:
+	critical_left = maxf(critical_left - delta, 0.0)
+	critical_tick.emit(critical_left)
+	# وميض أحمر متسارع كل ما اقترب الانفجار
+	var blink_speed := lerpf(6.0, 22.0, 1.0 - critical_left / critical_time)
+	_body_mat.emission_enabled = sin(Time.get_ticks_msec() * 0.001 * blink_speed) > 0.0
+	# زر التفجير اليدوي (للاعب) — ينفجر فوراً
+	if _detonate_in and not _detonate_prev:
+		_die(_last_attacker)
+		return
+	_detonate_prev = _detonate_in
+	# انتهى الوقت => انفجار
+	if critical_left <= 0.0:
+		_die(_last_attacker)
 
 
 func _read_input() -> void:
@@ -195,8 +256,21 @@ func _read_input() -> void:
 		_firing = false
 		_special_in = false
 		_cycle_in = false
+		_boost_in = false
+		_mine_in = false
 		return
-	if controls != null:
+	if ai_controlled:
+		_steer = ai_steer
+		_throttle = ai_throttle
+		_drifting = ai_drift
+		_braking = false
+		_firing = ai_fire
+		_special_in = ai_special
+		_cycle_in = false
+		_boost_in = ai_boost
+		_mine_in = false
+		_detonate_in = ai_detonate
+	elif controls != null:
 		_steer = controls.get_steer()
 		_throttle = controls.get_throttle()
 		_drifting = controls.is_drifting()
@@ -206,6 +280,7 @@ func _read_input() -> void:
 		_cycle_in = controls.is_cycle_pressed()
 		_boost_in = controls.is_boost_pressed()
 		_mine_in = controls.is_mine_pressed()
+		_detonate_in = controls.is_detonate_pressed()
 	else:
 		_steer = Input.get_axis("ui_left", "ui_right")
 		_throttle = 0.0
@@ -220,6 +295,7 @@ func _read_input() -> void:
 		_cycle_in = Input.is_key_pressed(KEY_E)
 		_boost_in = Input.is_key_pressed(KEY_SHIFT)
 		_mine_in = Input.is_key_pressed(KEY_R)
+		_detonate_in = Input.is_key_pressed(KEY_X)
 
 
 func _process_wheel(i: int) -> bool:
@@ -327,6 +403,14 @@ func _apply_boost(delta: float) -> void:
 #  الرشاش (لا نهائي - خفيف)
 # ============================================================
 
+func _update_aim_target() -> void:
+	if not aim_assist or not input_enabled:
+		aim_target = null
+		return
+	var from := global_transform * Vector3(0.0, 0.25, -1.25)
+	aim_target = _find_aim_target(from, -global_transform.basis.z)
+
+
 func _try_fire(delta: float) -> void:
 	_fire_cooldown -= delta
 	if not _firing or _fire_cooldown > 0.0:
@@ -335,7 +419,14 @@ func _try_fire(delta: float) -> void:
 
 	var b := global_transform.basis
 	var from := global_transform * Vector3(0.0, 0.25, -1.25)
-	var dir := (-b.z + b.x * randf_range(-0.015, 0.015) + b.y * randf_range(-0.01, 0.01)).normalized()
+	var base_dir := -b.z
+
+	# توجيه ذكي: نميل الاتجاه نحو الهدف المقفول (يتحدث كل إطار)
+	if aim_assist and input_enabled and aim_target != null and is_instance_valid(aim_target):
+		var to_target := (aim_target.global_position + Vector3.UP * 0.3 - from).normalized()
+		base_dir = base_dir.slerp(to_target, aim_assist_strength).normalized()
+
+	var dir := (base_dir + b.x * randf_range(-0.012, 0.012) + b.y * randf_range(-0.008, 0.008)).normalized()
 	var to := from + dir * gun_range
 
 	var query := PhysicsRayQueryParameters3D.create(from, to)
@@ -362,6 +453,36 @@ func _try_fire(delta: float) -> void:
 		_gun_snd.pitch_scale = randf_range(0.92, 1.12)
 		_gun_snd.play()
 	fired.emit()
+
+
+func _find_aim_target(from: Vector3, aim_dir: Vector3) -> Node3D:
+	# أقرب عدو حي داخل مخروط أمام السيارة وبمرمى واضح
+	var cos_limit := cos(deg_to_rad(aim_assist_angle))
+	var best: Node3D = null
+	var best_score := -1.0
+	for c in get_tree().get_nodes_in_group("cars"):
+		if c == self or not c.alive:
+			continue
+		var to: Vector3 = c.global_position + Vector3.UP * 0.3 - from
+		var d := to.length()
+		if d > gun_range or d < 0.5:
+			continue
+		var dir_to := to / d
+		var dot := aim_dir.dot(dir_to)
+		if dot < cos_limit:
+			continue
+		# نتأكد ما أكو جدار/بناية يحجب الهدف
+		var q := PhysicsRayQueryParameters3D.create(from, c.global_position + Vector3.UP * 0.3)
+		q.exclude = [get_rid()]
+		var h := get_world_3d().direct_space_state.intersect_ray(q)
+		if not h.is_empty() and h["collider"] != c:
+			continue
+		# نفضّل الأقرب لمركز التصويب ثم الأقرب مسافة
+		var score := dot - d / gun_range * 0.3
+		if score > best_score:
+			best_score = score
+			best = c
+	return best
 
 
 # ============================================================
@@ -501,19 +622,50 @@ func _spawn_mine(size_mult: float, dmg: float, radius: float, launch: float, qua
 # ============================================================
 
 func take_damage(amount: float, attacker: Node = null) -> void:
-	if not alive:
+	if not alive or critical:
+		return
+	# الدرع يمتص الضرر بالكامل وهو فعّال
+	if shield_time > 0.0:
+		Fx.sound(global_position, "hit", -4.0, 1.8)
 		return
 	health = maxf(health - amount, 0.0)
 	_flash_timer = 0.12
 	health_changed.emit(health, max_health)
 	if health <= 0.0:
-		_die(attacker)
+		_enter_critical(attacker)
+
+
+func _enter_critical(attacker: Node) -> void:
+	critical = true
+	critical_left = critical_time
+	_last_attacker = attacker
+	critical_started.emit(critical_left)
+	# دخان كثيف ونار
+	_damage_smoke.emitting = true
+	if _alarm_snd != null:
+		_alarm_snd.play()
+	Fx.sound(global_position, "beep", 0.0, 1.0)
+
+
+func add_shield(seconds: float) -> void:
+	shield_time = maxf(shield_time, seconds)
+	shield_changed.emit(true, shield_time)
+
+
+func repair(fraction: float) -> void:
+	# تصليح بنسبة من الصحة القصوى
+	health = minf(health + max_health * fraction, max_health)
+	health_changed.emit(health, max_health)
+	Fx.sound(global_position, "pickup", 0.0, 1.4)
 
 
 func _die(attacker: Node) -> void:
 	alive = false
+	critical = false
+	critical_ended.emit()
 	died.emit(attacker)
-	Fx.explosion(global_position, 18.0, 4.5, 5.0, attacker)
+	# انفجار قوي حسب القرب (أكبر من العادي)
+	Fx.explosion(global_position, critical_blast_damage, critical_blast_radius, critical_launch, attacker, 1.8)
 	visible = false
 	freeze = true
 	collision_layer = 0
@@ -532,6 +684,8 @@ func _die(attacker: Node) -> void:
 		_drift_snd.stop()
 	if _boost_snd != null:
 		_boost_snd.stop()
+	if _alarm_snd != null:
+		_alarm_snd.stop()
 	await get_tree().create_timer(respawn_delay).timeout
 	_respawn()
 
@@ -545,6 +699,9 @@ func _respawn() -> void:
 	collision_mask = 1
 	freeze = false
 	alive = true
+	critical = false
+	critical_left = 0.0
+	_detonate_prev = false
 	_flip_timer = 0.0
 	_boost = boost_max
 	boost_changed.emit(_boost, boost_max)
@@ -590,11 +747,22 @@ func _on_body_entered(body: Node) -> void:
 			body.take_damage(dmg, self)
 			_spawn_impact(contact)
 			Fx.sound(contact, "hit", 2.0, 0.6)
+	elif body is Destructible:
+		# البرميل ينفجر بالاصطدام؛ باقي الأجسام تنكسر لو الصدمة قوية
+		var hv := linear_velocity
+		hv.y = 0.0
+		var v := hv.length()
+		if body.kind == Destructible.Kind.BARREL and v >= 5.0:
+			body.take_damage(100.0, self)         # يفجّره فوراً
+		elif v >= 12.0:
+			body.take_damage((v - 8.0) * 3.0, self)
 
 	# ضرر على نفسك فقط من الصدمات المواجهة القوية (جدار/سيارة)
 	# الصعود على منحدر أو ملامسة الأرض عموديها للأعلى => closing صغير => لا ضرر
+	# البراميل ما تضررك بالاصطدام (تنفجر بس، وانفجارها يضررك لو قريب)
 	var self_threshold := 16.0
-	if impact > self_threshold:
+	var is_barrel: bool = body is Destructible and body.kind == Destructible.Kind.BARREL
+	if impact > self_threshold and not is_barrel:
 		take_damage((impact - self_threshold) * (0.7 if _boosting else 1.1), self)
 		if not (body is ArcadeCar):
 			_spawn_impact(contact)
@@ -649,11 +817,13 @@ func _update_visuals(delta: float) -> void:
 	_visual_root.rotation.z = lerpf(_visual_root.rotation.z, -_steer * 0.1, blend)
 	_muzzle.light_energy = lerpf(_muzzle.light_energy, 0.0, clampf(delta * 18.0, 0.0, 1.0))
 
-	if _flash_timer > 0.0:
-		_flash_timer -= delta
-		_body_mat.emission_enabled = true
-	else:
-		_body_mat.emission_enabled = false
+	# وميض الإصابة (يُتجاهل بالحالة الحرجة لأن لها وميضها الخاص)
+	if not critical:
+		if _flash_timer > 0.0:
+			_flash_timer -= delta
+			_body_mat.emission_enabled = true
+		else:
+			_body_mat.emission_enabled = false
 
 	# ضوء البريك الخلفي
 	_tail_mat.emission_energy_multiplier = 2.4 if _braking else 0.35
@@ -664,16 +834,36 @@ func _update_visuals(delta: float) -> void:
 	_damage_smoke.emitting = health < 40.0
 
 
+func _update_shield(delta: float) -> void:
+	if shield_time > 0.0:
+		shield_time = maxf(shield_time - delta, 0.0)
+		_shield_mesh.visible = true
+		# نبض + وميض قرب النهاية
+		var pulse := 1.0 + sin(Time.get_ticks_msec() * 0.008) * 0.05
+		_shield_mesh.scale = Vector3(pulse, pulse, pulse)
+		var a := 0.22
+		if shield_time < 1.5:
+			a = 0.22 * (0.4 + 0.6 * (sin(Time.get_ticks_msec() * 0.02) * 0.5 + 0.5))
+		_shield_mat.albedo_color.a = a
+		if shield_time <= 0.0:
+			shield_changed.emit(false, 0.0)
+	else:
+		if _shield_mesh.visible:
+			_shield_mesh.visible = false
+
+
 func _update_sounds() -> void:
 	if _engine_snd == null:
 		return
 	var ratio := clampf(linear_velocity.length() / max_speed, 0.0, 1.0)
 	_engine_snd.pitch_scale = 0.65 + ratio * 1.15
-	if input_enabled:
-		_engine_snd.volume_db = -15.0 + ratio * 8.0
-	else:
+	if not input_enabled:
 		_engine_snd.volume_db = -24.0
 		_engine_snd.pitch_scale = 0.6
+	elif ai_controlled:
+		_engine_snd.volume_db = -22.0 + ratio * 6.0     # الأعداء أهدأ
+	else:
+		_engine_snd.volume_db = -15.0 + ratio * 8.0
 
 	var drift_active := _drifting and _grounded and linear_velocity.length() > 6.0
 	if drift_active and not _drift_snd.playing:
@@ -1056,6 +1246,21 @@ func _build_effects() -> void:
 	_boost_flame_l = _make_flame(Vector3(-0.35, -0.1, 1.2))
 	_boost_flame_r = _make_flame(Vector3(0.35, -0.1, 1.2))
 
+	# فقاعة الدرع (مخفية حتى تتفعّل)
+	_shield_mesh = MeshInstance3D.new()
+	var sph := SphereMesh.new()
+	sph.radius = 1.5
+	sph.height = 3.0
+	_shield_mat = StandardMaterial3D.new()
+	_shield_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_shield_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_shield_mat.albedo_color = Color(0.3, 0.7, 1.0, 0.22)
+	_shield_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	sph.material = _shield_mat
+	_shield_mesh.mesh = sph
+	_shield_mesh.visible = false
+	add_child(_shield_mesh)
+
 
 func _make_flame(pos: Vector3) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
@@ -1126,6 +1331,16 @@ func _build_sounds() -> void:
 	_boost_snd.volume_db = -4.0
 	_boost_snd.max_distance = 60.0
 	add_child(_boost_snd)
+
+	var alarm_stream: AudioStreamWAV = load("res://assets/sfx/alarm.wav")
+	alarm_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	alarm_stream.loop_begin = 0
+	alarm_stream.loop_end = alarm_stream.data.size() / 2
+	_alarm_snd = AudioStreamPlayer3D.new()
+	_alarm_snd.stream = alarm_stream
+	_alarm_snd.volume_db = 0.0
+	_alarm_snd.max_distance = 70.0
+	add_child(_alarm_snd)
 
 
 func _mat(c: Color) -> StandardMaterial3D:
