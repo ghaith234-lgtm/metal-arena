@@ -119,12 +119,16 @@ func _build_environment() -> void:
 	_env.sky = sky
 	_env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	_env.ambient_light_energy = 1.0
-	# محرك الموبايل: نتجنب SSAO والتأثيrات الثقيلة. نخلي ضباب بسيط فقط.
-	_env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	_env.tonemap_mode = Environment.TONE_MAPPER_ACES     # ألوان سينمائية أقرب للواقع
+	_env.tonemap_white = 1.1
 	_env.fog_enabled = true
 	_env.fog_light_color = Color(0.6, 0.68, 0.78)
 	_env.fog_density = 0.005
 	_env.fog_sky_affect = 0.2
+	# توهج (مدعوم على الموبايل). SSAO يبقى مطفي لأنه غير مدعوم على Mobile renderer.
+	_env.glow_enabled = true
+	_env.glow_intensity = 0.2
+	_env.glow_bloom = 0.1
 	var we := WorldEnvironment.new()
 	we.environment = _env
 	add_child(we)

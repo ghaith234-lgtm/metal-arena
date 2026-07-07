@@ -113,15 +113,15 @@ func _process(delta: float) -> void:
 func _update_lock_marker() -> void:
 	if car == null or _cam == null or _lock_marker == null:
 		return
-	var tgt = car.aim_target
+	var tgt: Node3D = car.aim_target
 	if tgt == null or not is_instance_valid(tgt) or not car.alive:
 		_lock_marker.visible = false
 		return
-	var world := tgt.global_position + Vector3.UP * 0.4
+	var world: Vector3 = tgt.global_position + Vector3.UP * 0.4
 	if _cam.is_position_behind(world):
 		_lock_marker.visible = false
 		return
-	var screen := _cam.unproject_position(world)
+	var screen: Vector2 = _cam.unproject_position(world)
 	_lock_marker.position = screen - _lock_marker.size / 2.0
 	_lock_marker.visible = true
 	_lock_marker.queue_redraw()
