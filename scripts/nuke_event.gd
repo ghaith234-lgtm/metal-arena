@@ -205,8 +205,9 @@ func _drop_weapon_back() -> void:
 
 func _launch_nuke() -> void:
 	_phase = Phase.LAUNCHED
-	var launch_pos := _carrier.global_position if is_instance_valid(_carrier) else Vector3.ZERO
+	var launch_pos := Vector3.ZERO
 	if is_instance_valid(_carrier):
+		launch_pos = _carrier.global_position
 		_carrier.nuke_carrier = false
 		_carrier.set_meta("has_nuke", false)
 	announce.emit("🚀 تم إطلاق السلاح النووي!")

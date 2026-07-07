@@ -67,12 +67,14 @@ func _apply(t: float) -> void:
 	for i in range(SKY_KEYS.size() - 1):
 		var a: Array = SKY_KEYS[i]
 		var b: Array = SKY_KEYS[i + 1]
-		if t >= a[0] and t <= b[0]:
-			var k := inverse_lerp(a[0], b[0], t)
+		var a_t: float = a[0]
+		var b_t: float = b[0]
+		if t >= a_t and t <= b_t:
+			var k := inverse_lerp(a_t, b_t, t)
 			top = (a[1] as Color).lerp(b[1] as Color, k)
 			hor = (a[2] as Color).lerp(b[2] as Color, k)
-			sun_e = lerpf(a[3], b[3], k)
-			amb = lerpf(a[4], b[4], k)
+			sun_e = lerpf(float(a[3]), float(b[3]), k)
+			amb = lerpf(float(a[4]), float(b[4]), k)
 			break
 
 	# الغيوم/المطر تعتم الجو
@@ -123,13 +125,10 @@ func _build_environment() -> void:
 	_env.fog_light_color = Color(0.6, 0.68, 0.78)
 	_env.fog_density = 0.005
 	_env.fog_sky_affect = 0.2
-	# لمسات واقعية: توهج خفيف (SSAO مكلف على الموبايل فنخليه خفيف)
+	# توهج خفيف (مدعوم على الموبايل). ملاحظة: SSAO غير مدعوم على Mobile renderer
 	_env.glow_enabled = true
-	_env.glow_intensity = 0.25
+	_env.glow_intensity = 0.2
 	_env.glow_bloom = 0.1
-	_env.ssao_enabled = true
-	_env.ssao_radius = 1.2
-	_env.ssao_intensity = 1.0
 	var we := WorldEnvironment.new()
 	we.environment = _env
 	add_child(we)
