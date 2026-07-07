@@ -52,13 +52,14 @@ var _drift_time := 0.0
 
 
 func _ready() -> void:
+	# نبني الأساسيات أولاً (بيئة + كاميرا) حتى لو فشل شي بعدها يبقى المشهد ظاهر
 	_build_environment()
 	_build_arena()
 	_build_ui()
 	_spawn_player()
+	_spawn_camera()          # الكاميرا مبكراً حتى ما تصير الشاشة رمادية
 	_spawn_dummies()
 	_spawn_pickups()
-	_spawn_camera()
 	Fx.boom.connect(_on_boom)
 	if _weather != null and car != null:
 		_weather.set_follow(car)
@@ -602,7 +603,9 @@ func _update_nuke_hud(delta: float) -> void:
 	if _nuke_flash_rect.color.a > 0.0:
 		_nuke_flash_rect.color.a = maxf(_nuke_flash_rect.color.a - delta * 0.7, 0.0)
 	# لو اللاعب يحمل النووي: عداد + زر إطلاق (إلا لو بالحالة الحرجة)
-	if car != null and car.nuke_carrier and not car.critical:
+	if car == null or not is_instance_valid(car):
+		return
+	if car.nuke_carrier and not car.critical:
 		controls.set_show_detonate(true)
 		_center_label.visible = true
 		_center_label.modulate = Color(0.4, 1.0, 0.3)
@@ -613,7 +616,7 @@ func _update_nuke_hud(delta: float) -> void:
 			_center_label.visible = true
 			_center_label.modulate = Color(1.0, 0.5, 0.1)
 			_center_label.text = "⚠ عدو يحمل النووي — دمّره!"
-	elif not (car != null and car.critical):
+	elif not car.critical:
 		if _center_label.modulate.g > 0.5 or _center_label.text.begins_with("⚠ عدو") or _center_label.text.begins_with("🚀"):
 			_center_label.visible = false
 
