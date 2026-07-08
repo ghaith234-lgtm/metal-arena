@@ -3,7 +3,7 @@ extends RigidBody3D
 
 # ============================================================
 #  سيارة أركيد قتالية - المرحلة 4
-#  فيزياء + رشاش لا نهائي + أسلحة خاصة محدودة + أصوات + تفحيط
+#  فيزياء معدلة لتحكم أسهل وأكثر استجابة وثباتاً
 # ============================================================
 
 signal died(attacker)
@@ -27,17 +27,17 @@ signal mine_charging(ratio)
 @export var spring_damping: float = 90.0
 
 # ---------- الدفع ----------
-@export var engine_power: float = 1500.0
-@export var max_speed: float = 28.0
-@export var reverse_speed: float = 10.0
-@export var brake_power: float = 2200.0
-@export var extra_air_gravity: float = 6.0
+@export var engine_power: float = 2000.0      # تسارع أقوى
+@export var max_speed: float = 35.0           # سرعة قصوى أعلى
+@export var reverse_speed: float = 15.0       # سرعة رجوع للخلف أفضل
+@export var brake_power: float = 3500.0       # فرامل أقوى وأسرع استجابة
+@export var extra_air_gravity: float = 12.0   # سحب السيارة للأرض أسرع عند القفز
 
 # ---------- التحكم ----------
-@export var steer_strength: float = 4.5
-@export var grip: float = 6.0
-@export var drift_grip: float = 1.7
-@export var air_steer: float = 0.8
+@export var steer_strength: float = 7.0       # انعطاف أسرع وأكثر دقة
+@export var grip: float = 12.0                # ثبات عالي جداً لمنع الانزلاق
+@export var drift_grip: float = 3.5           # تفحيط مسيطر عليه ومستقر
+@export var air_steer: float = 2.0            # تحكم ممتاز أثناء الطيران في الهواء
 @export var body_color: Color = Color(0.85, 0.16, 0.1)
 
 # ---------- القتال ----------
@@ -154,8 +154,8 @@ func _ready() -> void:
 	mass = 60.0
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	center_of_mass = Vector3(0.0, -0.25, 0.0)
-	angular_damp = 3.0
-	linear_damp = 0.05
+	angular_damp = 5.0   # التخميد الزاوي: يمنع السيارة من الدوران حول نفسها عشوائياً
+	linear_damp = 0.5    # التخميد الخطي: يوقف السيارة بسرعة عند إفلات زر البنزين
 	can_sleep = false
 	continuous_cd = true
 	contact_monitor = true
