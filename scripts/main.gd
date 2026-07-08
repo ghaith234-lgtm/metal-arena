@@ -31,8 +31,13 @@ var _cam: ChaseCamera
 var _weather: Weather
 var _nuke: NukeEvent
 var _nuke_flash_rect: ColorRect
+var _nuke_timer_label: Label
 var _announce_label: Label
 var _announce_time := 0.0
+var _headlight_check := 0.0
+var _projector_lights: Array = []
+var _projector_mats: Array = []
+var _projectors_on := false
 var _radar: Radar
 var _lock_marker: Control
 var _shield_label: Label
@@ -99,9 +104,29 @@ func _process(delta: float) -> void:
 			_drift_label.visible = false
 	_update_lock_marker()
 	_update_nuke_hud(delta)
+	_update_headlights(delta)
 	# نحدّث هدف الرادار (النووي)
 	if _radar != null and _nuke != null:
 		_radar.objective = _nuke.get_objective()
+
+
+func _update_headlights(delta: float) -> void:
+	_headlight_check -= delta
+	if _headlight_check > 0.0:
+		return
+	_headlight_check = 1.0
+	# الأضواء دائماً مشتغلة (سيارات + بروجيكتر)
+	if car != null and is_instance_valid(car):
+		car.set_headlights(true)
+	for d in _dummies:
+		if is_instance_valid(d):
+			d.set_headlights(true)
+	if not _projectors_on:
+		_projectors_on = true
+		for spot in _projector_lights:
+			spot.light_energy = 2.5
+		for lm in _projector_mats:
+			lm.emission_energy_multiplier = 3.0
 	# عدّاد الدرع
 	if car != null and car.shield_time > 0.0:
 		_shield_label.visible = true
@@ -184,6 +209,80 @@ func _build_arena() -> void:
 	_add_box(Vector3(-18, 0.85, 18), Vector3(8.0, 0.5, 7.0), ramp_c, Vector3(-16.0, 180.0, 0.0))
 
 	_spawn_destructibles()
+	_build_projectors()
+
+
+func _build_projectors() -> void:
+	# كشافات ملعب على أعمدة بالزوايا - تشتغل بالليل
+	var corners = [
+		Vector3(-50, 0, -50), Vector3(50, 0, -50),
+		Vector3(-50, 0, 50), Vector3(50, 0, 50),
+	]
+	for corner in corners:
+		# عمود
+		var pole := MeshInstance3D.new()
+		var pm := CylinderMesh.new()
+		pm.top_radius = 0.3
+		pm.bottom_radius = 0.4
+		pm.height = 16.0
+		var pole_mat := StandardMaterial3D.new()
+		pole_mat.albedo_color = Color(0.3, 0.32, 0.35)
+		pole_mat.metallic = 0.6
+		pm.material = pole_mat
+		pole.mesh = pm
+		var body := StaticBody3D.new()
+		var col := CollisionShape3D.new()
+		var cshape := CylinderShape3D.new()
+		cshape.radius = 0.4
+		cshape.height = 16.0
+		col.shape = cshape
+		body.add_child(col)
+		body.add_child(pole)
+		add_child(body)
+		body.position = corner + Vector3(0, 8, 0)
+
+		# صندوق الكشافات فوق العمود
+		var head := MeshInstance3D.new()
+		var hm := BoxMesh.new()
+		hm.size = Vector3(2.5, 0.8, 1.0)
+		var head_mat := StandardMaterial3D.new()
+		head_mat.albedo_color = Color(0.15, 0.15, 0.17)
+		hm.material = head_mat
+		head.mesh = hm
+		add_child(head)
+		# يتجه نحو وسط الملعب
+		head.position = corner + Vector3(0, 16, 0)
+		head.look_at(Vector3(0, 0, 0), Vector3.UP)
+
+		# سطح مضيء (لمبات) - نخزنه لنطفيه/نشعله
+		var lamp := MeshInstance3D.new()
+		var lm := BoxMesh.new()
+		lm.size = Vector3(2.3, 0.6, 0.1)
+		var lamp_mat := StandardMaterial3D.new()
+		lamp_mat.albedo_color = Color(0.9, 0.9, 0.8)
+		lamp_mat.emission_enabled = true
+		lamp_mat.emission = Color(1.0, 0.98, 0.85)
+		lamp_mat.emission_energy_multiplier = 0.3
+		lm.material = lamp_mat
+		lamp.mesh = lm
+		lamp.position = corner + Vector3(0, 16, 0)
+		lamp.look_at(Vector3(0, 0, 0), Vector3.UP)
+		lamp.translate_object_local(Vector3(0, 0, -0.55))
+		add_child(lamp)
+		_projector_mats.append(lamp_mat)
+
+		# ضوء spotlight فعلي من الكشاف نحو الملعب
+		var spot := SpotLight3D.new()
+		spot.position = corner + Vector3(0, 16, 0)
+		spot.look_at(Vector3(0, 0, 0), Vector3.UP)
+		spot.light_color = Color(1.0, 0.98, 0.9)
+		spot.light_energy = 0.0                # مطفي بالنهار
+		spot.spot_range = 90.0
+		spot.spot_angle = 40.0
+		spot.spot_attenuation = 0.8
+		spot.shadow_enabled = false
+		add_child(spot)
+		_projector_lights.append(spot)
 
 
 func _spawn_destructibles() -> void:
@@ -422,6 +521,15 @@ func _build_ui() -> void:
 	_nuke_flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(_nuke_flash_rect)
 
+	# عدّاد وصول النووي (فوق يسار تحت السرعة)
+	_nuke_timer_label = Label.new()
+	_nuke_timer_label.position = Vector2(26, 156)
+	_nuke_timer_label.add_theme_font_size_override("font_size", 22)
+	_nuke_timer_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.1))
+	_nuke_timer_label.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	_nuke_timer_label.add_theme_constant_override("outline_size", 4)
+	layer.add_child(_nuke_timer_label)
+
 
 # ---------- السيارات والصناديق ----------
 
@@ -592,6 +700,18 @@ func _on_nuke_flash() -> void:
 
 
 func _update_nuke_hud(delta: float) -> void:
+	# عدّاد وصول النووي / حالة الحدث
+	if _nuke != null and _nuke_timer_label != null:
+		var t := _nuke.get_time_until_nuke()
+		if t > 0.0:
+			var mins := int(t) / 60
+			var secs := int(t) % 60
+			_nuke_timer_label.text = "☢ النووي بعد %d:%02d" % [mins, secs]
+			_nuke_timer_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.1))
+		else:
+			var phase_txt := _nuke.get_phase_text()
+			_nuke_timer_label.text = ("☢ " + phase_txt) if phase_txt != "" else "☢ ..."
+			_nuke_timer_label.add_theme_color_override("font_color", Color(1.0, 0.4, 0.15))
 	# تلاشي الإعلان
 	if _announce_time > 0.0:
 		_announce_time -= delta
@@ -606,10 +726,19 @@ func _update_nuke_hud(delta: float) -> void:
 	if car == null or not is_instance_valid(car):
 		return
 	if car.nuke_carrier and not car.critical:
-		controls.set_show_detonate(true)
-		_center_label.visible = true
-		_center_label.modulate = Color(0.4, 1.0, 0.3)
-		_center_label.text = "🚀 أطلق النووي! %.1f" % _nuke.get_carry_left()
+		var carry_left: float = _nuke.get_carry_left()
+		var elapsed: float = 10.0 - carry_left
+		if elapsed < _nuke.launch_lockout:
+			# فترة الحظر - ما يقدر يطلق بعد
+			controls.set_show_detonate(false)
+			_center_label.visible = true
+			_center_label.modulate = Color(1.0, 0.7, 0.1)
+			_center_label.text = "احمِ نفسك! الإطلاق متاح بعد %.0f" % (_nuke.launch_lockout - elapsed)
+		else:
+			controls.set_show_detonate(true)
+			_center_label.visible = true
+			_center_label.modulate = Color(0.4, 1.0, 0.3)
+			_center_label.text = "🚀 أطلق الآن! %.1f" % carry_left
 	elif _nuke != null and _nuke.get_carrier() != null and _nuke.get_carrier() != car:
 		# عدو يحمله - تحذير
 		if not car.critical:

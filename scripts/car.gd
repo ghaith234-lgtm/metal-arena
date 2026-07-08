@@ -87,6 +87,10 @@ var _detonate_in := false
 var _detonate_prev := false
 var _last_attacker: Node = null
 var _alarm_snd: AudioStreamPlayer3D
+var _crit_label: Label3D
+var _head_mat: StandardMaterial3D
+var _headlights: Array = []
+var _headlights_on := false
 
 # الأسلحة الخاصة (محدودة العدد)
 var ammo := {"rocket": 0, "homing": 0, "mine": 0}
@@ -178,6 +182,18 @@ func get_boost_ratio() -> float:
 	return _boost / boost_max
 
 
+func set_headlights(on: bool) -> void:
+	if on == _headlights_on:
+		return
+	_headlights_on = on
+	var energy := 3.5 if on else 0.0
+	for spot in _headlights:
+		spot.light_energy = energy
+	# المصابيح الأمامية تصير أوضح بالليل
+	if _head_mat != null:
+		_head_mat.emission_energy_multiplier = 3.0 if on else 1.6
+
+
 func set_body_color(c: Color) -> void:
 	body_color = c
 	if _body_mat != null:
@@ -234,6 +250,9 @@ func _physics_process(delta: float) -> void:
 func _update_critical(delta: float) -> void:
 	critical_left = maxf(critical_left - delta, 0.0)
 	critical_tick.emit(critical_left)
+	# رقم العدّاد العائم
+	if _crit_label != null:
+		_crit_label.text = "%.1f" % critical_left
 	# وميض أحمر متسارع كل ما اقترب الانفجار
 	var blink_speed := lerpf(6.0, 22.0, 1.0 - critical_left / critical_time)
 	_body_mat.emission_enabled = sin(Time.get_ticks_msec() * 0.001 * blink_speed) > 0.0
@@ -442,7 +461,7 @@ func _try_fire(delta: float) -> void:
 		if col is ArcadeCar:
 			col.take_damage(gun_damage, self)
 			hit_landed.emit()
-		elif col is Destructible:
+		elif col is Destructible or col is NukeCrate:
 			col.take_damage(gun_damage, self)
 			hit_landed.emit()
 
@@ -642,6 +661,17 @@ func _enter_critical(attacker: Node) -> void:
 	critical_started.emit(critical_left)
 	# دخان كثيف ونار
 	_damage_smoke.emitting = true
+	# رقم عدّاد عائم فوق السيارة (يبين لكل السيارات)
+	if _crit_label == null:
+		_crit_label = Label3D.new()
+		_crit_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		_crit_label.font_size = 120
+		_crit_label.outline_size = 20
+		_crit_label.modulate = Color(1.0, 0.2, 0.1)
+		_crit_label.position.y = 1.8
+		_crit_label.no_depth_test = true
+		add_child(_crit_label)
+	_crit_label.visible = true
 	if _alarm_snd != null:
 		_alarm_snd.play()
 	Fx.sound(global_position, "beep", 0.0, 1.0)
@@ -664,6 +694,8 @@ func _die(attacker: Node) -> void:
 	critical = false
 	critical_ended.emit()
 	died.emit(attacker)
+	if _crit_label != null:
+		_crit_label.visible = false
 	# انفجار قوي حسب القرب (أكبر من العادي)
 	Fx.explosion(global_position, critical_blast_damage, critical_blast_radius, critical_launch, attacker, 1.8)
 	visible = false
@@ -885,6 +917,24 @@ func _check_recovery(delta: float) -> void:
 		global_transform = _spawn_transform
 		linear_velocity = Vector3.ZERO
 		angular_velocity = Vector3.ZERO
+		# لو كانت بالحالة الحرجة وطاحت من الخريطة => نلغي المؤقت (بداية نظيفة)
+		if critical:
+			_clear_critical()
+			health = max_health
+			health_changed.emit(health, max_health)
+
+
+func _clear_critical() -> void:
+	critical = false
+	critical_left = 0.0
+	_detonate_prev = false
+	_damage_smoke.emitting = false
+	_body_mat.emission_enabled = false
+	if _crit_label != null:
+		_crit_label.visible = false
+	if _alarm_snd != null:
+		_alarm_snd.stop()
+	critical_ended.emit()
 
 
 func _recover() -> void:
@@ -971,8 +1021,9 @@ func _make_particles(pos: Vector3, color: Color, amount: int, life: float, vel_m
 func _build_body() -> void:
 	var col := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
-	shape.size = Vector3(1.3, 0.5, 2.2)
+	shape.size = Vector3(1.5, 1.1, 2.4)   # أعرض وأعلى ليغطي كامل السيارة (بما فيها الكابينة)
 	col.shape = shape
+	col.position.y = 0.35                  # نرفعه ليغطي من الأرض للسقف
 	add_child(col)
 
 	_visual_root = Node3D.new()
@@ -1165,18 +1216,31 @@ func _build_body() -> void:
 		_visual_root.add_child(ex)
 
 	# مصابيح أمامية مضيئة
-	var head_mat := _mat(Color(1.0, 0.95, 0.7))
-	head_mat.emission_enabled = true
-	head_mat.emission = Color(1.0, 0.9, 0.55)
-	head_mat.emission_energy_multiplier = 1.6
+	_head_mat = _mat(Color(1.0, 0.95, 0.7))
+	_head_mat.emission_enabled = true
+	_head_mat.emission = Color(1.0, 0.9, 0.55)
+	_head_mat.emission_energy_multiplier = 1.6
 	for sx in [-0.45, 0.45]:
 		var hl := MeshInstance3D.new()
 		var hmesh := BoxMesh.new()
 		hmesh.size = Vector3(0.24, 0.12, 0.05)
-		hmesh.material = head_mat
+		hmesh.material = _head_mat
 		hl.mesh = hmesh
 		hl.position = Vector3(sx, 0.12, -1.36)
 		_visual_root.add_child(hl)
+
+	# كشاف واحد مركزي (بدل اثنين) - أخف على الموبايل، مطفي بالنهار
+	var spot := SpotLight3D.new()
+	spot.position = Vector3(0.0, 0.15, -1.4)
+	spot.rotation_degrees = Vector3(-8.0, 0.0, 0.0)   # الكشاف يضوي على -Z محلياً = مقدمة السيارة
+	spot.light_color = Color(1.0, 0.95, 0.8)
+	spot.light_energy = 0.0                              # مطفي افتراضياً
+	spot.spot_range = 22.0
+	spot.spot_angle = 38.0
+	spot.spot_attenuation = 1.2
+	spot.shadow_enabled = false
+	_visual_root.add_child(spot)
+	_headlights.append(spot)
 
 	# مصابيح خلفية (تشتد مع البريك)
 	_tail_mat = _mat(Color(0.9, 0.1, 0.08))

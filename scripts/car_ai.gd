@@ -47,9 +47,9 @@ func _physics_process(delta: float) -> void:
 		car.ai_drift = false
 		car.ai_fire = false
 		car.ai_special = false
-		# يطلق النووي (يضغط زر التفجير) - الـ car يحوّله لإطلاق
+		# يطلق النووي (يضغط زر التفجير) بعد فترة الحظر - الـ car يحوّله لإطلاق
 		_nuke_launch_t += delta
-		car.ai_detonate = _nuke_launch_t > 1.5   # ينتظر لحظة ثم يطلق
+		car.ai_detonate = _nuke_launch_t > 7.5   # ينتظر انتهاء فترة الحظر ثم يطلق
 		return
 	_nuke_launch_t = 0.0
 

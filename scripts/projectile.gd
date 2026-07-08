@@ -88,6 +88,15 @@ func _physics_process(delta: float) -> void:
 			Fx.sound(global_position, "beep", -8.0, 1.3)
 
 	var next := global_position + direction * speed * delta
+
+	# صمام تقارب: لو قرب من أي سيارة حية، ينفجر فوراً (يمسك السيارات السريعة)
+	for c in get_tree().get_nodes_in_group("cars"):
+		if c == owner_car or not c.alive:
+			continue
+		if global_position.distance_to(c.global_position) < 1.8:
+			_explode(global_position)
+			return
+
 	var query := PhysicsRayQueryParameters3D.create(global_position, next)
 	query.collide_with_bodies = true
 	query.collide_with_areas = false

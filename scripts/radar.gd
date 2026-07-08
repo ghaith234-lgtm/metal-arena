@@ -42,9 +42,10 @@ func _draw() -> void:
 	if player == null or not is_instance_valid(player):
 		return
 
-	# زاوية اللاعب حتى نلف الرادار (اتجاه السيارة للأعلى)
+	# اتجاه اللاعب: الأمام والى اليمين (بمستوى XZ)
 	var fwd := -player.global_transform.basis.z
-	var yaw := atan2(fwd.x, fwd.z)
+	var fwd2 := Vector2(fwd.x, fwd.z).normalized()
+	var right2 := Vector2(-fwd2.y, fwd2.x)   # يمين اللاعب
 
 	# اللاعب سهم بالوسط
 	_draw_player_arrow(center)
@@ -54,11 +55,11 @@ func _draw() -> void:
 		if not is_instance_valid(e) or not e.get("alive"):
 			continue
 		var rel: Vector3 = e.global_position - player.global_position
-		var dist := Vector2(rel.x, rel.z).length()
-		# تحويل للإحداثيات المحلية للرادار (مع الدوران)
-		var lx := rel.x * cos(-yaw) - rel.z * sin(-yaw)
-		var lz := rel.x * sin(-yaw) + rel.z * cos(-yaw)
-		var screen := Vector2(lx, lz) / world_range * _radius
+		var relf := Vector2(rel.x, rel.z)
+		# مركبة الأمام (للأعلى بالشاشة = -Y) ومركبة اليمين (+X)
+		var forward_amt := relf.dot(fwd2)
+		var right_amt := relf.dot(right2)
+		var screen := Vector2(right_amt, -forward_amt) / world_range * _radius
 		var clamped := screen
 		var on_edge := false
 		if screen.length() > _radius - 6.0:
@@ -71,9 +72,8 @@ func _draw() -> void:
 	# الهدف الخاص (النووي) نقطة صفراء نابضة
 	if objective != null and is_instance_valid(objective):
 		var rel: Vector3 = objective.global_position - player.global_position
-		var lx := rel.x * cos(-yaw) - rel.z * sin(-yaw)
-		var lz := rel.x * sin(-yaw) + rel.z * cos(-yaw)
-		var screen := Vector2(lx, lz) / world_range * _radius
+		var relf := Vector2(rel.x, rel.z)
+		var screen := Vector2(relf.dot(right2), -relf.dot(fwd2)) / world_range * _radius
 		if screen.length() > _radius - 6.0:
 			screen = screen.normalized() * (_radius - 6.0)
 		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006)

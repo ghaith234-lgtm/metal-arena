@@ -8,7 +8,7 @@ extends Node3D
 #  - يبدأ بوقت عشوائي وحالة طقس عشوائية كل جولة
 # ============================================================
 
-@export var day_length := 120.0        # ثواني دورة كاملة (نهار+ليل)
+@export var day_length := 480.0        # ثواني دورة كاملة (8 دقائق - نهار وليل أطول)
 @export var rain_enabled := false
 @export var time_of_day := 0.35        # 0=منتصف الليل، 0.25=شروق، 0.5=ظهر، 0.75=غروب
 
@@ -41,6 +41,22 @@ func _ready() -> void:
 
 func set_follow(n: Node3D) -> void:
 	_follow = n
+
+
+func is_night() -> bool:
+	# ليل = قبل الشروق أو بعد الغروب (الشمس واطية)
+	return time_of_day < 0.24 or time_of_day > 0.78
+
+
+func get_darkness() -> float:
+	# 0 = نهار كامل، 1 = ليل كامل (لشدة الأضواء)
+	if time_of_day < 0.24 or time_of_day > 0.78:
+		return 1.0
+	elif time_of_day < 0.30:
+		return inverse_lerp(0.30, 0.24, time_of_day)
+	elif time_of_day > 0.72:
+		return inverse_lerp(0.72, 0.78, time_of_day)
+	return 0.0
 
 
 func randomize_weather() -> void:
@@ -140,13 +156,14 @@ func _build_lights() -> void:
 	_sun.light_energy = 1.2
 	_sun.light_color = Color(1.0, 0.97, 0.9)
 	_sun.shadow_enabled = true
+	_sun.directional_shadow_max_distance = 60.0   # مسافة ظل أقصر = أداء أفضل
 	add_child(_sun)
 
 	_moon = DirectionalLight3D.new()
 	_moon.rotation_degrees = Vector3(125.0, -35.0, 0.0)
 	_moon.light_energy = 0.0
 	_moon.light_color = Color(0.6, 0.7, 0.95)
-	_moon.shadow_enabled = true
+	_moon.shadow_enabled = false     # ظل واحد فقط (الشمس) للأداء على الموبايل
 	add_child(_moon)
 
 
@@ -174,7 +191,7 @@ func _build_rain() -> void:
 	mesh.material = mm
 	_rain.draw_pass_1 = mesh
 
-	_rain.amount = 800
+	_rain.amount = 500
 	_rain.lifetime = 1.2
 	_rain.preprocess = 1.0
 	_rain.visibility_aabb = AABB(Vector3(-45, -5, -45), Vector3(90, 40, 90))
