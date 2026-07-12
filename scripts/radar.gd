@@ -8,7 +8,8 @@ extends Control
 
 var player: Node3D = null
 var enemies: Array = []          # قائمة عقد الأعداء
-var objective: Node3D = null     # هدف خاص (السلاح النووي) يبين أصفر
+var objective: Node3D = null
+var mines: Array = []     # هدف خاص (السلاح النووي) يبين أصفر
 var world_range := 70.0          # نصف قطر ما يغطيه الرادار بالعالم
 
 var _radius := 90.0
@@ -68,6 +69,22 @@ func _draw() -> void:
 		var dot_pos := center + clamped
 		var col := Color(0.95, 0.25, 0.2) if not on_edge else Color(0.95, 0.55, 0.2)
 		draw_circle(dot_pos, 5.0 if not on_edge else 4.0, col)
+
+	# 💣 ألغامي البريموت (سماوية - حمراء نابضة لو خصم قربها)
+	for mn in mines:
+		if not is_instance_valid(mn):
+			continue
+		var mrel: Vector3 = mn.global_position - player.global_position
+		var mf := Vector2(mrel.x, mrel.z)
+		var ms := Vector2(mf.dot(right2), -mf.dot(fwd2)) / world_range * _radius
+		if ms.length() > _radius - 5.0:
+			ms = ms.normalized() * (_radius - 5.0)
+		var near: bool = mn.enemy_near()
+		var mpulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.014)
+		var mcol := Color(1.0, 0.2, 0.1, 0.6 + mpulse * 0.4) if near else Color(0.35, 0.9, 1.0, 0.85)
+		draw_circle(center + ms, 5.0 if near else 4.0, mcol)
+		if near:
+			draw_arc(center + ms, 8.0 + mpulse * 3.0, 0.0, TAU, 16, Color(1.0, 0.3, 0.1, mpulse), 2.0)
 
 	# الهدف الخاص (النووي) نقطة صفراء نابضة
 	if objective != null and is_instance_valid(objective):

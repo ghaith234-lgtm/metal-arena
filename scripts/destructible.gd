@@ -10,6 +10,8 @@ signal destroyed(pos)
 
 enum Kind { TREE, BUILDING_SMALL, BUILDING_TALL, BARREL, NUKE_CRATE }
 
+var indestructible := false     # 🏢 المباني: تتضرر بصرياً بس ما تنهار
+
 @export var kind: Kind = Kind.TREE
 var health := 40.0
 var max_health := 40.0
@@ -30,12 +32,14 @@ func setup(k: Kind) -> void:
 			_build_tree()
 			_debris_color = Color(0.35, 0.5, 0.2)
 		Kind.BUILDING_SMALL:
-			max_health = 120.0
-			_build_building(3.0, 3.5, 3.0, Color(0.6, 0.55, 0.48))
+			indestructible = true          # 🏢 المباني ما تتدمر
+			max_health = 999999.0
+			_build_building(11.0, 13.0, 11.0, Color(0.6, 0.55, 0.48))
 			_debris_color = Color(0.55, 0.5, 0.45)
 		Kind.BUILDING_TALL:
-			max_health = 220.0
-			_build_building(3.5, 7.0, 3.5, Color(0.5, 0.52, 0.58))
+			indestructible = true
+			max_health = 999999.0
+			_build_building(13.0, 26.0, 13.0, Color(0.5, 0.52, 0.58))
 			_debris_color = Color(0.5, 0.52, 0.55)
 		Kind.BARREL:
 			max_health = 18.0
@@ -50,6 +54,10 @@ func setup(k: Kind) -> void:
 
 func take_damage(amount: float, _attacker: Node = null) -> void:
 	if _dead:
+		return
+	# 🏢 المباني: تومض عند الإصابة بس ما تنهار أبداً
+	if indestructible:
+		_flash = 0.08
 		return
 	health -= amount
 	_flash = 0.1

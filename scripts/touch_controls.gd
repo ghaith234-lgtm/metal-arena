@@ -18,9 +18,11 @@ const BOOST_RADIUS := 72.0
 const DRIFT_RADIUS := 62.0
 const BRAKE_RADIUS := 52.0
 
-var special_text := "-"
+var rocket_text := "-"
+var homing_text := "-"
+var rocket_charge := 0        # عدد القذائف المخزنة (يظهر على الزر)
 var mine_text := "لغم 0"
-var mine_charge := 0.0
+var mine_charge := 0
 var boost_ratio := 1.0
 
 var _steer_touch := -1
@@ -29,12 +31,14 @@ var _steer_pos := Vector2.ZERO
 var _touch_steer := 0.0
 var _touch_throttle := 0.0
 var _fire_touch := -1
-var _spec_touch := -1
-var _cycle_touch := -1
+var _rocket_touch := -1
+var _homing_touch := -1
 var _mine_touch := -1
 var _boost_touch := -1
 var _detonate_touch := -1
-var show_detonate := false        # يظهر زر التفجير بس بالحالة الحرجة
+var show_detonate := false        # يظهر زر التفجير
+var detonate_text := "فجّر!"
+var detonate_ready := false       # أحمر نابض = خصم قرب اللغم
 var _drift_touch := -1
 var _brake_touch := -1
 
@@ -67,8 +71,15 @@ func _process(_delta: float) -> void:
 		queue_redraw()
 
 
-func set_special_text(t: String) -> void:
-	special_text = t
+func set_ammo_text(rocket: String, homing: String) -> void:
+	rocket_text = rocket
+	homing_text = homing
+	queue_redraw()
+
+
+func set_rocket_charge(n: int) -> void:
+	rocket_charge = n
+	queue_redraw()
 	queue_redraw()
 
 
@@ -77,8 +88,9 @@ func set_mine_text(t: String) -> void:
 	queue_redraw()
 
 
-func set_mine_charge(r: float) -> void:
-	mine_charge = r
+func set_mine_charge(n: int) -> void:
+	mine_charge = n
+	queue_redraw()
 	queue_redraw()
 
 
@@ -101,6 +113,13 @@ func is_detonate_pressed() -> bool:
 
 func set_show_detonate(v: bool) -> void:
 	show_detonate = v
+	queue_redraw()
+
+
+func set_detonate_mode(txt: String, ready: bool) -> void:
+	detonate_text = txt
+	detonate_ready = ready
+	queue_redraw()
 	queue_redraw()
 
 
@@ -141,12 +160,12 @@ func is_firing() -> bool:
 	return _fire_touch != -1 or Input.is_key_pressed(KEY_F) or Input.is_key_pressed(KEY_ENTER)
 
 
-func is_special_pressed() -> bool:
-	return _spec_touch != -1 or Input.is_key_pressed(KEY_Q)
+func is_rocket_pressed() -> bool:
+	return _rocket_touch != -1 or Input.is_key_pressed(KEY_Q)
 
 
-func is_cycle_pressed() -> bool:
-	return _cycle_touch != -1 or Input.is_key_pressed(KEY_E)
+func is_homing_pressed() -> bool:
+	return _homing_touch != -1 or Input.is_key_pressed(KEY_E)
 
 
 # ---------- معالجة اللمس ----------
@@ -169,10 +188,10 @@ func _on_touch_down(index: int, pos: Vector2) -> void:
 		return
 	if pos.distance_to(_fire_center()) <= FIRE_RADIUS:
 		_fire_touch = index
-	elif pos.distance_to(_spec_center()) <= SPEC_RADIUS:
-		_spec_touch = index
-	elif pos.distance_to(_cycle_center()) <= CYCLE_RADIUS:
-		_cycle_touch = index
+	elif pos.distance_to(_rocket_center()) <= SPEC_RADIUS:
+		_rocket_touch = index
+	elif pos.distance_to(_homing_center()) <= SPEC_RADIUS:
+		_homing_touch = index
 	elif pos.distance_to(_mine_center()) <= MINE_RADIUS:
 		_mine_touch = index
 	elif pos.distance_to(_boost_center()) <= BOOST_RADIUS:
@@ -209,10 +228,10 @@ func _on_touch_up(index: int) -> void:
 		_touch_throttle = 0.0
 	if index == _fire_touch:
 		_fire_touch = -1
-	if index == _spec_touch:
-		_spec_touch = -1
-	if index == _cycle_touch:
-		_cycle_touch = -1
+	if index == _rocket_touch:
+		_rocket_touch = -1
+	if index == _homing_touch:
+		_homing_touch = -1
 	if index == _mine_touch:
 		_mine_touch = -1
 	if index == _boost_touch:
@@ -243,29 +262,44 @@ func _draw() -> void:
 		_draw_label(hint, "قود", 20, Color(1, 1, 1, 0.3))
 
 	_draw_button(_fire_center(), FIRE_RADIUS, "FIRE", _fire_touch != -1, Color(0.95, 0.25, 0.2))
-	_draw_button(_spec_center(), SPEC_RADIUS, special_text, _spec_touch != -1, Color(0.62, 0.3, 0.85))
-	_draw_button(_cycle_center(), CYCLE_RADIUS, "بدّل", _cycle_touch != -1, Color(0.3, 0.32, 0.38))
+	_draw_button(_rocket_center(), SPEC_RADIUS, "قاذف " + rocket_text, _rocket_touch != -1, Color(0.85, 0.45, 0.2))
+	# حلقة الشحن حول زر القاذف (تكبر مع عدد القذائف المخزنة)
+	if rocket_charge > 0:
+		var rc := _rocket_center()
+		var pulse := 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.01)
+		var ring_r := SPEC_RADIUS + 8.0 + rocket_charge * 4.0
+		draw_arc(rc, ring_r, 0.0, TAU, 40, Color(1.0, 0.6, 0.1, pulse), 4.0 + rocket_charge)
+		_draw_label(rc + Vector2(0, -ring_r - 18.0), "x%d" % rocket_charge, 26, Color(1.0, 0.75, 0.2))
+	_draw_button(_homing_center(), SPEC_RADIUS, "متتبع " + homing_text, _homing_touch != -1, Color(0.62, 0.3, 0.85))
 	_draw_mine_button()
 	_draw_boost_button()
 	_draw_button(_drift_center(), DRIFT_RADIUS, "DRIFT", _drift_touch != -1, Color(1.0, 0.55, 0.1))
 	_draw_button(_brake_center(), BRAKE_RADIUS, "BRAKE", _brake_touch != -1, Color(0.35, 0.55, 0.9))
 
-	# زر التفجير (بالحالة الحرجة فقط) - كبير ونابض وسط أسفل الشاشة
+	# زر التفجير - نابض وسط أسفل الشاشة (حرج = يفجر السيارة | ألغام = يفجر البريموت)
 	if show_detonate:
 		var c := _detonate_center()
-		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012)
-		var col := Color(1.0, 0.2, 0.1)
-		draw_circle(c, 100.0, Color(col.r, col.g, col.b, 0.3 + pulse * 0.35))
-		draw_arc(c, 100.0, 0.0, TAU, 48, Color(1.0, 0.5, 0.2, 0.9), 5.0)
-		_draw_label(c, "فجّر!", 40, Color(1, 1, 1, 1))
+		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * (0.02 if detonate_ready else 0.012))
+		var col := Color(1.0, 0.2, 0.1) if detonate_ready else Color(0.9, 0.45, 0.15)
+		var r := 100.0 if detonate_ready else 82.0
+		draw_circle(c, r, Color(col.r, col.g, col.b, 0.3 + pulse * 0.35))
+		draw_arc(c, r, 0.0, TAU, 48, Color(1.0, 0.5, 0.2, 0.9), 5.0)
+		if detonate_ready:
+			draw_arc(c, r + 10.0 + pulse * 6.0, 0.0, TAU, 48, Color(1.0, 0.25, 0.1, pulse), 3.0)
+		_draw_label(c, detonate_text, 36, Color(1, 1, 1, 1))
 
 
 func _draw_mine_button() -> void:
 	var c := _mine_center()
 	_draw_button(c, MINE_RADIUS, mine_text, _mine_touch != -1, Color(0.75, 0.68, 0.15))
 	# حلقة الشحن وقت الضغط المطول
-	if mine_charge > 0.0:
-		draw_arc(c, MINE_RADIUS + 6.0, -PI / 2.0, -PI / 2.0 + TAU * mine_charge, 48, Color(1.0, 0.35, 0.1), 5.0)
+	if mine_charge > 0:
+		# حلقة نابضة تكبر مع العدد + xN فوق الزر
+		var mp := 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.011)
+		var mr := MINE_RADIUS + 7.0 + mine_charge * 4.0
+		draw_arc(c, mr, 0.0, TAU, 40, Color(1.0, 0.4, 0.1, mp), 4.0 + mine_charge * 0.6)
+		if mine_charge > 1:
+			_draw_label(c + Vector2(0, -mr - 17.0), "x%d" % mine_charge, 24, Color(1.0, 0.6, 0.2))
 
 
 func _draw_boost_button() -> void:
@@ -299,12 +333,12 @@ func _fire_center() -> Vector2:
 	return Vector2(size.x - 120.0, size.y - 130.0)
 
 
-func _spec_center() -> Vector2:
+func _rocket_center() -> Vector2:
 	return Vector2(size.x - 125.0, size.y - 300.0)
 
 
-func _cycle_center() -> Vector2:
-	return Vector2(size.x - 200.0, size.y - 388.0)
+func _homing_center() -> Vector2:
+	return Vector2(size.x - 285.0, size.y - 460.0)
 
 
 func _boost_center() -> Vector2:

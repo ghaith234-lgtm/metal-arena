@@ -26,6 +26,7 @@ var _heli: Node3D = null
 var _crate: NukeCrate = null
 var _weapon: Node3D = null
 var _carrier: Node3D = null
+var _launcher: Node3D = null    # 🏆 من أطلق النووي (للنقاط)
 var _carry_left := 0.0
 var _drop_pos := Vector3.ZERO
 var _heli_snd: AudioStreamPlayer3D
@@ -56,7 +57,9 @@ func _start_incoming() -> void:
 	announce.emit("☢ السلاح النووي قادم! ☢")
 	Fx.sound(Vector3.ZERO, "siren", 4.0, 1.0)
 	# نسقط الصندوق قرب وسط الخريطة (مكان يشوفه الكل)
-	_drop_pos = Vector3(randf_range(-10, 10), 0.0, randf_range(-10, 10))
+	# منطقة الإسقاط من ملف الخريطة
+	var spread: float = Maps.get_map(Global.selected_map)["nuke_spread"]
+	_drop_pos = Vector3(randf_range(-spread, spread), 0.0, randf_range(-spread, spread))
 
 	# هليكوبتر تجي من الجو
 	_heli = _build_helicopter()
@@ -205,6 +208,7 @@ func _drop_weapon_back() -> void:
 # ---------- 4. الإطلاق: صاروخ يصعد وينزل انفجار هائل ----------
 
 func _launch_nuke() -> void:
+	_launcher = _carrier
 	_phase = Phase.LAUNCHED
 	var launch_pos := Vector3.ZERO
 	if is_instance_valid(_carrier):
@@ -251,13 +255,11 @@ func _nuke_detonate(pos: Vector3) -> void:
 	# حفرة دائمة مكان الانفجار
 	_spawn_crater(pos)
 
-	# سلو موشن لحظة
-	Engine.time_scale = 0.25
-	var slow_timer := get_tree().create_timer(0.5, true, false, true)  # يتجاهل time_scale
-	slow_timer.timeout.connect(func() -> void: Engine.time_scale = 1.0)
+	# 🎬 بلا بطيء زمني (آمن للعب الشبكي) - الوميض والاهتزاز يكفون
 
 	# انفجار ضخم يغطي مساحة كبيرة جداً
-	Fx.explosion(pos, 500.0, 55.0, 40.0, null, 4.0)
+	# 🏆 القاتل = اللي أطلق النووي (تنحسب له النقاط)
+	Fx.explosion(pos, 500.0, 55.0, 40.0, _launcher, 4.0)
 	# موجات ثانوية للتأثير
 	for i in 3:
 		var d := create_tween()

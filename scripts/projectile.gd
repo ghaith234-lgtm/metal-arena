@@ -12,6 +12,12 @@ var direction := Vector3.FORWARD
 var speed := 30.0
 var damage := 35.0
 var blast_radius := 4.0
+var visual_scale := 1.0
+var tint := Color(1.0, 0.55, 0.1)   # لون القذيفة (يتغير مع الشحن)
+var is_homing := false
+var no_proximity := false   # لا ينفجر بالتقارب (لازم اصطدام مباشر)
+var ballistic := false               # وضع الهاون: سقوط عمودي
+var vspeed := 0.0    # السرعة العمودية (للهاون - تحددها السيارة)
 var launch_dv := 4.5
 var turn_rate := 0.0        # راديان/ثانية (0 = مستقيم)
 var life := 5.0
@@ -21,24 +27,25 @@ var _armed := 0.0
 
 
 func _ready() -> void:
+	# قذيفة كروية متوهجة - تكبر حسب الشحن
 	var body := MeshInstance3D.new()
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.0
-	cyl.bottom_radius = 0.12
-	cyl.height = 0.7
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.18 * visual_scale
+	sphere.height = 0.36 * visual_scale
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.9, 0.35, 0.1)
+	var dark := (tint.r + tint.g + tint.b) < 0.5
+	mat.albedo_color = tint
 	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.5, 0.1)
-	cyl.material = mat
-	body.mesh = cyl
-	body.rotation.x = -PI / 2.0
+	mat.emission = Color(0.45, 0.2, 0.55) if dark else tint
+	mat.emission_energy_multiplier = 1.2 if dark else 2.0
+	sphere.material = mat
+	body.mesh = sphere
 	add_child(body)
 
 	var light := OmniLight3D.new()
-	light.light_color = Color(1.0, 0.6, 0.2)
-	light.light_energy = 1.6
-	light.omni_range = 5.0
+	light.light_color = Color(0.6, 0.4, 0.7) if dark else tint
+	light.light_energy = 0.9 if dark else 1.8
+	light.omni_range = 5.0 * visual_scale
 	add_child(light)
 
 	var trail := GPUParticles3D.new()
@@ -74,6 +81,22 @@ func _physics_process(delta: float) -> void:
 		_explode(global_position)
 		return
 
+	# هاون: قوس بالستي كامل (أفقي + عمودي بجاذبية)
+	if ballistic:
+		vspeed -= 26.0 * delta
+		global_position += (direction * speed + Vector3.UP * vspeed) * delta
+		if vspeed < 0.0:
+			# أثناء النزول: ينفجر بالقرب من أي سيارة أو عند الأرض
+			for c in get_tree().get_nodes_in_group("cars"):
+				if c == owner_car or not c.get("alive"):
+					continue
+				if global_position.distance_to(c.global_position) < 2.2:
+					_explode(global_position)
+					return
+			if global_position.y <= 0.35:
+				_explode(global_position)
+		return
+
 	# تتبع الهدف بدوران محدود
 	if turn_rate > 0.0 and is_instance_valid(target) and target.get("alive"):
 		var desired := (target.global_position + Vector3.UP * 0.5 - global_position).normalized()
@@ -90,12 +113,13 @@ func _physics_process(delta: float) -> void:
 	var next := global_position + direction * speed * delta
 
 	# صمام تقارب: لو قرب من أي سيارة حية، ينفجر فوراً (يمسك السيارات السريعة)
-	for c in get_tree().get_nodes_in_group("cars"):
-		if c == owner_car or not c.alive:
-			continue
-		if global_position.distance_to(c.global_position) < 1.8:
-			_explode(global_position)
-			return
+	if not no_proximity:
+		for c in get_tree().get_nodes_in_group("cars"):
+			if c == owner_car or not c.alive:
+				continue
+			if global_position.distance_to(c.global_position) < 1.8 * maxf(visual_scale, 1.0):
+				_explode(global_position)
+				return
 
 	var query := PhysicsRayQueryParameters3D.create(global_position, next)
 	query.collide_with_bodies = true
@@ -114,5 +138,18 @@ func _physics_process(delta: float) -> void:
 
 
 func _explode(pos: Vector3) -> void:
+	# المتتبع: يرفع الضحية لفوق + كل 3 ضربات => هاون
+	if is_homing:
+		var victim: Node3D = null
+		var best := 999.0
+		for c in get_tree().get_nodes_in_group("cars"):
+			if c == owner_car or not c.get("alive"):
+				continue
+			var d := pos.distance_to(c.global_position)
+			if d < blast_radius + 1.0 and d < best:
+				best = d
+				victim = c
+		if victim != null:
+			victim.apply_central_impulse(Vector3.UP * victim.mass * 7.5)
 	Fx.explosion(pos, damage, blast_radius, launch_dv, owner_car)
 	queue_free()

@@ -32,6 +32,13 @@ const SKY_KEYS = [
 ]
 
 
+# يطبّق الإعدادات الحالية فوراً (بعد تغييرها من الخارج)
+func apply_now() -> void:
+	_apply(time_of_day)
+	if _rain != null and is_instance_valid(_rain):
+		_rain.emitting = rain_enabled
+
+
 func _ready() -> void:
 	_build_environment()
 	_build_lights()
@@ -118,8 +125,15 @@ func _apply(t: float) -> void:
 	_moon.visible = moon_e > 0.02
 
 	# الضباب يتبع لون الأفق
-	_env.fog_light_color = hor.lerp(Color(0.5, 0.5, 0.55), 0.3)
-	_env.fog_density = 0.012 if rain_enabled else 0.005
+	# 🌫️ الضباب من ملف الخريطة (يعطي عمق وجمال للمشهد)
+	var mp: Dictionary = Maps.get_map(Global.selected_map)
+	var fog_on: bool = mp["fog"]
+	_env.fog_enabled = fog_on
+	if fog_on:
+		var mc: Color = mp["fog_color"]
+		_env.fog_light_color = hor.lerp(mc, 0.55)
+		var base: float = float(mp["fog_density"])
+		_env.fog_density = (base * 2.0) if rain_enabled else base
 
 
 func _build_environment() -> void:

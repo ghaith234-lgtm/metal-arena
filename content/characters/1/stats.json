@@ -1,0 +1,11 @@
+{
+  "class": "medium",
+  "lift": -0.13,
+  "wheels": {
+    "front": 0.9,    
+    "back": 0.85,     
+    "width": 0.6,    
+    "height": 0.1,   
+    "size": 0.7       
+  }
+}

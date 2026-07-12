@@ -8,7 +8,7 @@ extends Node3D
 
 var kind := "rocket"
 
-const AMOUNTS = {"rocket": 10, "homing": 10, "mine": 10}
+const AMOUNTS = {"rocket": 5, "homing": 3, "mine": 4}
 const COLORS = {
 	"rocket": Color(0.95, 0.5, 0.1),
 	"homing": Color(0.9, 0.15, 0.15),
